@@ -228,7 +228,7 @@ function WarmupPage({ devices, token }: { devices: Device[]; token: string }) {
     try {
       const data = await apiPost("/api/tasks/run", { task_type: "warmup_ig", device_id: selectedDevice || devices[0].id, params: JSON.stringify({ account, duration_minutes: parseInt(duration) }) });
       setMsg(`✅ Warmup encolado (ID: ${data.task_run.id})`);
-    } catch { setMsg("❌ Error al lanzar warmup"); } finally { setSending(false); }
+    } catch (e) { setMsg(`❌ Error: ${e instanceof Error ? e.message : 'desconocido'}`); } finally { setSending(false); }
   };
 
   return (
