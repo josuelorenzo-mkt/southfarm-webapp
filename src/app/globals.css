@@ -1,0 +1,17 @@
+@import "tailwindcss";
+
+:root {
+  --sf-green: #4ade80;
+  --sf-bg: #0d0d0d;
+  --sf-card: #1a1a1a;
+  --sf-border: #2a2a2a;
+}
+
+body {
+  background: var(--sf-bg);
+  color: white;
+}
+
+input:focus {
+  outline: none;
+}
