@@ -226,9 +226,14 @@ function WarmupPage({ devices, token }: { devices: Device[]; token: string }) {
     if (!account || devices.length === 0) return;
     setSending(true); setMsg("");
     try {
-      const data = await apiPost("/api/tasks/run", { task_type: "warmup_ig", device_id: selectedDevice || devices[0].id, params: JSON.stringify({ account, duration_minutes: parseInt(duration) }) });
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      const t = localStorage.getItem("token");
+      if (t) headers["Authorization"] = `Bearer ${t}`;
+      const res = await fetch(`${API}/api/tasks/run`, { method: "POST", headers, body: JSON.stringify({ task_type: "warmup_ig", device_id: selectedDevice || devices[0].id, params: { account, duration_minutes: parseInt(duration) } }) });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Error");
       setMsg(`✅ Warmup encolado (ID: ${data.task_run.id})`);
-    } catch (e) { setMsg(`❌ Error: ${e instanceof Error ? e.message : 'desconocido'}`); } finally { setSending(false); }
+    } catch (e) { setMsg(`❌ Error: ${e instanceof Error ? e.message : "desconocido"}`); } finally { setSending(false); }
   };
 
   return (
