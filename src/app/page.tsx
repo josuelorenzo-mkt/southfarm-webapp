@@ -203,18 +203,31 @@ function FleetPage({ devices, loading, onRefresh }: { devices: Device[]; loading
   );
 }
 
-function WarmupPage({ devices }: { devices: Device[] }) {
+interface IGAccount { id: number; username: string; device_id: number; }
+
+function WarmupPage({ devices, token }: { devices: Device[]; token: string }) {
   const [account, setAccount] = useState("");
   const [duration, setDuration] = useState("2");
   const [sending, setSending] = useState(false);
   const [msg, setMsg] = useState("");
+  const [igAccounts, setIgAccounts] = useState<IGAccount[]>([]);
+  const [selectedDevice, setSelectedDevice] = useState<number>(devices[0]?.id || 0);
+
+  useEffect(() => {
+    if (selectedDevice) {
+      apiGet(`/api/ig-accounts?device_id=${selectedDevice}`, token).then((data) => {
+        setIgAccounts(data.accounts || []);
+        if ((data.accounts || []).length > 0) setAccount(data.accounts[0].username);
+      });
+    }
+  }, [selectedDevice, token]);
 
   const launch = async () => {
     if (!account || devices.length === 0) return;
     setSending(true); setMsg("");
     try {
-      const data = await apiPost("/api/tasks/run", { task_type: "warmup_ig", device_id: devices[0].id, params: JSON.stringify({ account, duration_minutes: parseInt(duration) }) });
-      setMsg(`✅ Warmup encolado (ID: ${data.task_run.id})`); setAccount("");
+      const data = await apiPost("/api/tasks/run", { task_type: "warmup_ig", device_id: selectedDevice || devices[0].id, params: JSON.stringify({ account, duration_minutes: parseInt(duration) }) });
+      setMsg(`✅ Warmup encolado (ID: ${data.task_run.id})`);
     } catch { setMsg("❌ Error al lanzar warmup"); } finally { setSending(false); }
   };
 
@@ -225,8 +238,20 @@ function WarmupPage({ devices }: { devices: Device[] }) {
         <Card className="text-center p-8"><p className="text-zinc-400">No hay dispositivos disponibles</p><p className="text-zinc-600 text-sm mt-1">Conectá un teléfono primero</p></Card>
       ) : (
         <Card className="space-y-4">
-          <div><label className="text-xs text-zinc-500 font-medium mb-1.5 block">Dispositivo</label><select className="w-full rounded-xl px-4 py-3 text-sm text-white outline-none" style={{ background: "#0f0f12", border: "1px solid #27272a" }}>{devices.map((d) => <option key={d.id} value={d.id}>{d.device_name || d.device_id.slice(0, 16)}</option>)}</select></div>
-          <div><label className="text-xs text-zinc-500 font-medium mb-1.5 block">Cuenta de Instagram</label><input type="text" placeholder="@username" value={account} onChange={(e) => setAccount(e.target.value)} className="w-full rounded-xl px-4 py-3 text-white placeholder-zinc-600 outline-none" style={{ background: "#0f0f12", border: "1px solid #27272a" }} /></div>
+          <div><label className="text-xs text-zinc-500 font-medium mb-1.5 block">Dispositivo</label>
+            <select value={selectedDevice} onChange={(e) => setSelectedDevice(Number(e.target.value))} className="w-full rounded-xl px-4 py-3 text-sm text-white outline-none" style={{ background: "#0f0f12", border: "1px solid #27272a" }}>
+              {devices.map((d) => <option key={d.id} value={d.id}>{d.device_name || d.device_id.slice(0, 16)}</option>)}
+            </select>
+          </div>
+          <div><label className="text-xs text-zinc-500 font-medium mb-1.5 block">Cuenta de Instagram</label>
+            {igAccounts.length > 0 ? (
+              <select value={account} onChange={(e) => setAccount(e.target.value)} className="w-full rounded-xl px-4 py-3 text-sm text-white outline-none" style={{ background: "#0f0f12", border: "1px solid #27272a" }}>
+                {igAccounts.map((a) => <option key={a.id} value={a.username}>@{a.username}</option>)}
+              </select>
+            ) : (
+              <input type="text" placeholder="@username (escaneá cuentas en la app)" value={account} onChange={(e) => setAccount(e.target.value)} className="w-full rounded-xl px-4 py-3 text-white placeholder-zinc-600 outline-none" style={{ background: "#0f0f12", border: "1px solid #27272a" }} />
+            )}
+          </div>
           <div><label className="text-xs text-zinc-500 font-medium mb-1.5 block">Duración</label><div className="flex gap-2">{["1", "2", "5", "10"].map((d) => (<button key={d} onClick={() => setDuration(d)} className={`flex-1 py-2.5 rounded-lg text-sm font-medium transition ${duration === d ? "text-black" : "text-zinc-500"}`} style={duration === d ? { background: "#22c55e" } : { background: "#0f0f12", border: "1px solid #27272a" }}>{d}m</button>))}</div></div>
           <button onClick={launch} disabled={sending || !account} className="w-full py-3 rounded-xl font-bold text-black transition hover:brightness-110 disabled:opacity-40" style={{ background: "#22c55e" }}>{sending ? "Enviando..." : "🚀 Lanzar Warmup"}</button>
           {msg && <p className="text-sm text-center">{msg}</p>}
@@ -315,7 +340,7 @@ export default function Home() {
       <main className="flex-1 p-6 pb-24 md:pb-6 max-w-4xl">
         {page === "dashboard" && <DashboardPage sessions={sessions} devices={devices} />}
         {page === "fleet" && <FleetPage devices={devices} loading={loading} onRefresh={() => loadData(token)} />}
-        {page === "warmup" && <WarmupPage devices={devices} />}
+        {page === "warmup" && <WarmupPage devices={devices} token={token} />}
         {page === "history" && <HistoryPage sessions={sessions} />}
         {page === "settings" && <SettingsPage userName={userName} onLogout={logout} />}
       </main>
