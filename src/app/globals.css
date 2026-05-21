@@ -1,17 +1,37 @@
 @import "tailwindcss";
 
 :root {
-  --sf-green: #4ade80;
-  --sf-bg: #0d0d0d;
-  --sf-card: #1a1a1a;
-  --sf-border: #2a2a2a;
+  --sf-bg: #0b0f0b;
+  --sf-card: #141a14;
+  --sf-card-hover: #1a221a;
+  --sf-border: #1f2a1f;
+  --sf-accent: #34d399;
+  --sf-accent-dim: rgba(52, 211, 153, 0.12);
+  --sf-amber: #f59e0b;
+  --sf-text: #e8ede8;
+  --sf-text-dim: #6b7f6b;
 }
 
 body {
   background: var(--sf-bg);
-  color: white;
+  color: var(--sf-text);
 }
 
-input:focus {
+input:focus, select:focus {
   outline: none;
+  border-color: var(--sf-accent) !important;
+}
+
+select option {
+  background: var(--sf-card);
+  color: var(--sf-text);
+}
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.pulse-dot {
+  animation: pulse-dot 2s ease-in-out infinite;
 }
