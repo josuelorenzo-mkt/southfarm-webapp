@@ -1,20 +1,25 @@
 @import "tailwindcss";
 
 :root {
-  --sf-bg: #0b0f0b;
-  --sf-card: #141a14;
-  --sf-card-hover: #1a221a;
-  --sf-border: #1f2a1f;
-  --sf-accent: #34d399;
-  --sf-accent-dim: rgba(52, 211, 153, 0.12);
-  --sf-amber: #f59e0b;
-  --sf-text: #e8ede8;
-  --sf-text-dim: #6b7f6b;
+  --sf-bg: #0a0a0a;
+  --sf-sidebar: #0f0f12;
+  --sf-card: #1a1a1a;
+  --sf-border: #2a2a2a;
+  --sf-muted: #1f1f23;
+  --sf-accent: #4ade80;
+  --sf-text: #ffffff;
+  --sf-text-secondary: #a1a1aa;
+  --sf-blue: #60a5fa;
+  --sf-pink: #f472b6;
+  --sf-amber: #fbbf24;
+  --sf-orange: #f97316;
+  --sf-red: #ef4444;
 }
 
 body {
   background: var(--sf-bg);
   color: var(--sf-text);
+  font-family: var(--font-outfit), 'Outfit', system-ui, sans-serif;
 }
 
 input:focus, select:focus {
@@ -35,3 +40,8 @@ select option {
 .pulse-dot {
   animation: pulse-dot 2s ease-in-out infinite;
 }
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--sf-border); border-radius: 3px; }
