@@ -427,7 +427,16 @@ function DeviceCard({ d, token, igAccounts, sessions, activeRun, onLaunched }: {
   })();
 
   const last = sessions.filter(s => igAccounts.some(a => a.username === s.account)).sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())[0] || null;
-  const isActive = !!(activeRun && (activeRun.status === 'pending' || activeRun.status === 'running'));
+  const isActive = (() => {
+    if (!activeRun || (activeRun.status !== 'pending' && activeRun.status !== 'running')) return false;
+    const started = new Date(activeRun.created_at).getTime();
+    const params = JSON.parse(activeRun.params || '{}');
+    const durMin = params.duration_minutes || 2;
+    const totalMs = durMin * 60000;
+    // If more than 2x the duration has passed, consider it stale
+    if (Date.now() - started > totalMs * 2) return false;
+    return true;
+  })();
 
   // Timer calculation from active task_run
   const timerInfo = (() => {
@@ -437,11 +446,9 @@ function DeviceCard({ d, token, igAccounts, sessions, activeRun, onLaunched }: {
     const durMin = params.duration_minutes || 2;
     const totalMs = durMin * 60000;
     const elapsedMs = now - started;
-    const remainingMs = Math.max(0, totalMs - elapsedMs);
-    const pct = Math.min(100, (elapsedMs / totalMs) * 100);
-    const remMin = Math.floor(remainingMs / 60000);
-    const remSec = Math.floor((remainingMs % 60000) / 1000);
-    return { pct, remaining: remMin > 0 ? `${remMin}m ${remSec}s` : `${remSec}s`, durMin };
+    const pct = Math.min(100, Math.max(0, (elapsedMs / totalMs) * 100));
+    const elSec = Math.floor(elapsedMs / 1000);
+    return { pct, elapsed: elSec >= 60 ? `${Math.floor(elSec/60)}m ${elSec%60}s` : `${elSec}s`, durMin };
   })();
 
   const launch = async () => {
@@ -505,7 +512,10 @@ function DeviceCard({ d, token, igAccounts, sessions, activeRun, onLaunched }: {
               <div style={{ width: "100%", height: 4, background: "rgba(255,255,255,0.08)", borderRadius: 2, overflow: "hidden" }}>
                 <div style={{ width: `${timerInfo.pct}%`, height: "100%", borderRadius: 2, background: "#f97316", transition: "width 1s linear" }} />
               </div>
-              <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>{timerInfo.remaining} restante</div>
+              <div className="flex justify-between" style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>
+                <span>{timerInfo.elapsed}</span>
+                <span>{timerInfo.durMin}min</span>
+              </div>
             </div>
           )}
         </div>
@@ -584,6 +594,7 @@ function FleetPage({ devices, loading, onRefresh, token }: { devices: Device[]; 
   const [igAccountsMap, setIgAccountsMap] = useState<Record<number, IGAccount[]>>({});
   const [sessions, setSessions] = useState<Session[]>([]);
   const [activeRuns, setActiveRuns] = useState<Record<number, any>>({});
+  const [showQR, setShowQR] = useState(false);
 
   const loadExtra = useCallback(() => {
     if (!token) return;
@@ -611,6 +622,18 @@ function FleetPage({ devices, loading, onRefresh, token }: { devices: Device[]; 
 
   return (
     <div>
+      {/* QR Modal */}
+      {showQR && (
+        <div onClick={() => setShowQR(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, cursor: "pointer" }}>
+          <div onClick={e => e.stopPropagation()} style={{ background: "var(--bg-surface)", border: "1px solid var(--border-subtle)", borderRadius: "var(--radius-lg)", padding: 32, maxWidth: 360, width: "90%", textAlign: "center", cursor: "default" }}>
+            <h3 style={{ fontSize: 18, fontWeight: 600, marginBottom: 8 }}>Add New Device</h3>
+            <p style={{ fontSize: 13, color: "var(--text-muted)", marginBottom: 20 }}>Scan with your Android phone to download SouthFarm</p>
+            <img src="/qr-download.png" alt="QR Code" width={200} height={200} style={{ margin: "0 auto 16px", borderRadius: 12, display: "block" }} />
+            <p style={{ fontSize: 11, color: "var(--text-muted)" }}>Or visit: <span style={{ color: "var(--accent)" }}>southfarm.tech/download</span></p>
+            <button onClick={() => setShowQR(false)} style={{ marginTop: 16, padding: "8px 20px", borderRadius: "var(--radius-md)", border: "1px solid var(--border-subtle)", background: "var(--bg-elevated)", color: "var(--text-secondary)", cursor: "pointer", fontSize: 13 }}>Close</button>
+          </div>
+        </div>
+      )}
       <div className="hidden lg:block" style={{ marginBottom: 28 }}>
         <h2 style={{ fontSize: 26, fontWeight: 700, letterSpacing: -0.5, marginBottom: 6 }}>Device Fleet</h2>
         <p style={{ color: "var(--text-secondary)", fontSize: 14 }}>Monitor, control and launch warmups on your devices</p>
@@ -630,6 +653,7 @@ function FleetPage({ devices, loading, onRefresh, token }: { devices: Device[]; 
           </div>
           <div className="flex items-center gap-2.5">
             <span className="px-2.5 py-1 rounded-full text-xs font-bold" style={{ background: "var(--success-dim)", color: "var(--success)" }}>{devices.length} online</span>
+            <button onClick={() => setShowQR(true)} className="flex items-center justify-center" style={{ width: 32, height: 32, borderRadius: "var(--radius-md)", border: "1px solid var(--accent)", background: "var(--success-dim)", color: "var(--accent)", fontSize: 18, fontWeight: 700, cursor: "pointer" }}>+</button>
             <button onClick={onRefresh} className="hidden lg:flex items-center gap-1.5" style={{ padding: "7px 12px", fontSize: 12, fontWeight: 600, borderRadius: "var(--radius-md)", border: "1px solid var(--border-default)", background: "var(--bg-elevated)", color: "var(--text-primary)", cursor: "pointer" }}>
               <IconRefresh /> Refresh
             </button>
