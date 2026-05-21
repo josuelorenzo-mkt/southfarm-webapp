@@ -29,7 +29,7 @@ interface Session {
 
 interface Device { id: number; device_id: string; device_name: string | null; android_version: string | null; created_at: string; }
 interface IGAccount { id: number; username: string; device_id: number; }
-type Page = "dashboard" | "fleet" | "warmup" | "history" | "settings";
+type Page = "dashboard" | "fleet" | "history" | "settings";
 
 // ─── SVG Icons ──────────────────────────────────────────
 const IconDashboard = () => (
@@ -87,7 +87,6 @@ const NAV_SECTIONS = [
   ]},
   { title: "Operations", items: [
     { id: "fleet" as Page, label: "Fleet", Icon: IconPhone },
-    { id: "warmup" as Page, label: "Warmup", Icon: IconActivity },
     { id: "history" as Page, label: "History", Icon: IconClock },
   ]},
   { title: "System", items: [
@@ -401,17 +400,162 @@ function DashboardPage({ sessions, devices }: { sessions: Session[]; devices: De
   );
 }
 
-// ─── Fleet Page (Granja Sur style) ─────────────────────────
+// ─── Single Device Card (with inline warmup) ─────────────────
+function DeviceCard({ d, token, igAccounts, sessions, onLaunched }: { d: Device; token: string; igAccounts: IGAccount[]; sessions: Session[]; onLaunched: () => void }) {
+  const [expanded, setExpanded] = useState(false);
+  const [account, setAccount] = useState("");
+  const [duration, setDuration] = useState("2");
+  const [sending, setSending] = useState(false);
+  const [msg, setMsg] = useState("");
+
+  useEffect(() => {
+    if (igAccounts.length > 0 && !account) setAccount(igAccounts[0].username);
+  }, [igAccounts]);
+
+  const stats = (() => {
+    const accNames = igAccounts.map(a => a.username);
+    const ds = sessions.filter(s => accNames.includes(s.account));
+    return { total: ds.length, reels: ds.reduce((s, x) => s + (x.reels_viewed || 0), 0), likes: ds.reduce((s, x) => s + (x.likes || 0), 0), mins: Math.round(ds.reduce((s, x) => s + (x.elapsed_sec || 0), 0) / 60) };
+  })();
+
+  const last = sessions.filter(s => igAccounts.some(a => a.username === s.account)).sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())[0] || null;
+  const isActive = last && last.status === "running";
+
+  const launch = async () => {
+    if (!account) return;
+    setSending(true); setMsg("");
+    try {
+      const headers: Record<string, string> = { "Content-Type": "application/json", Authorization: `Bearer ${token}` };
+      const res = await fetch(`${API}/api/tasks/run`, { method: "POST", headers, body: JSON.stringify({ task_type: "warmup_ig", device_id: d.id, params: { account, duration_minutes: parseInt(duration) } }) });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Error");
+      setMsg(`Warmup encolado!`);
+      onLaunched();
+      setTimeout(() => { setExpanded(false); setMsg(""); }, 2000);
+    } catch (e) { setMsg(`Error: ${e instanceof Error ? e.message : "desconocido"}`); } finally { setSending(false); }
+  };
+
+  return (
+    <div style={{ position: "relative", borderRadius: "var(--radius-lg)", padding: isActive ? 2 : 0, overflow: "hidden" }}>
+      {isActive && (
+        <div style={{ position: "absolute", top: "50%", left: "50%", width: "200%", height: "200%", transform: "translate(-50%, -50%)", background: "conic-gradient(from 0deg, transparent 0%, #22c55e 10%, #3b82f6 20%, #a855f7 30%, #22c55e 40%, transparent 50%)", animation: "borderSpin 3s linear infinite", zIndex: 0 }} />
+      )}
+      <div className="device-card-inner" style={{ background: "linear-gradient(145deg, var(--bg-elevated) 0%, var(--bg-surface) 100%)", border: isActive ? "none" : "1px solid var(--border-subtle)", borderRadius: "var(--radius-lg)", padding: 22, position: "relative", overflow: "hidden", zIndex: 1, transition: "all 0.25s ease", boxShadow: isActive ? "0 0 12px rgba(34,197,94,0.2)" : "none" }}
+        onMouseEnter={e => { if (!isActive) { e.currentTarget.style.borderColor = "var(--border-default)"; e.currentTarget.style.transform = "translateY(-3px)"; e.currentTarget.style.boxShadow = "var(--shadow-lg)"; } }}
+        onMouseLeave={e => { if (!isActive) { e.currentTarget.style.borderColor = "var(--border-subtle)"; e.currentTarget.style.transform = "none"; e.currentTarget.style.boxShadow = "none"; } }}
+      >
+        {/* Green glow */}
+        <div style={{ position: "absolute", top: "-50%", right: "-50%", width: "100%", height: "100%", background: "radial-gradient(circle, rgba(34,197,94,0.06) 0%, transparent 60%)", pointerEvents: "none" }} />
+
+        {/* Header */}
+        <div className="flex items-center justify-between" style={{ marginBottom: 18 }}>
+          <div className="flex items-center gap-3">
+            <div className="flex items-center justify-center" style={{ width: 48, height: 48, borderRadius: "var(--radius-md)", background: "var(--bg-active)" }}><IconPhone /></div>
+            <div>
+              <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 2 }}>{d.device_name || "Unknown Device"}</div>
+              <div style={{ fontSize: 12, color: "var(--text-muted)" }}>Android {d.android_version || "?"} · {d.device_id.slice(0, 12)}</div>
+            </div>
+          </div>
+          <span className="px-3 py-1.5 rounded-full font-bold uppercase tracking-wide" style={{ fontSize: 11, letterSpacing: 0.3, background: "var(--success-dim)", color: "var(--success)", boxShadow: "0 0 12px var(--success-dim)" }}>
+            <span className="pulse-dot inline-block mr-1" style={{ width: 6, height: 6, borderRadius: "50%", background: "currentColor" }} /> Online
+          </span>
+        </div>
+
+        {/* Activity badge */}
+        <div className="flex items-center gap-2" style={{ marginBottom: 14 }}>
+          {isActive ? (
+            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg" style={{ fontSize: 14, fontWeight: 600, background: "rgba(249,115,22,0.15)", color: "#f97316", border: "1px solid rgba(249,115,22,0.3)", animation: "activityPulse 2s ease-in-out infinite" }}>
+              <span style={{ width: 6, height: 6, borderRadius: "50%", background: "currentColor", animation: "dotPulse 1.5s ease-in-out infinite" }} /> Warmup en curso
+            </div>
+          ) : last ? (
+            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg" style={{ fontSize: 13, fontWeight: 600, background: "rgba(34,197,94,0.1)", color: "var(--success)", border: "1px solid rgba(34,197,94,0.2)" }}>
+              <span className="pulse-dot" style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--success)" }} /> Listo
+            </div>
+          ) : (
+            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg" style={{ fontSize: 13, fontWeight: 600, background: "rgba(255,255,255,0.05)", color: "var(--text-muted)", border: "1px solid var(--border-subtle)" }}>Sin actividad</div>
+          )}
+        </div>
+
+        {/* Stats 2x2 */}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 16 }}>
+          <div style={{ background: "var(--bg-base)", padding: 14, borderRadius: "var(--radius-md)", border: "1px solid var(--border-subtle)" }}>
+            <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.03rem", marginBottom: 6 }}>Sesiones</div>
+            <div style={{ fontSize: 18, fontWeight: 700, color: "var(--accent)" }}>{stats.total}</div>
+          </div>
+          <div style={{ background: "var(--bg-base)", padding: 14, borderRadius: "var(--radius-md)", border: "1px solid var(--border-subtle)" }}>
+            <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.03rem", marginBottom: 6 }}>Reels</div>
+            <div style={{ fontSize: 18, fontWeight: 700, color: "#60a5fa" }}>{stats.reels}</div>
+          </div>
+          <div style={{ background: "var(--bg-base)", padding: 14, borderRadius: "var(--radius-md)", border: "1px solid var(--border-subtle)" }}>
+            <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.03rem", marginBottom: 6 }}>Likes</div>
+            <div style={{ fontSize: 18, fontWeight: 700, color: "#f472b6" }}>{stats.likes}</div>
+          </div>
+          <div style={{ background: "var(--bg-base)", padding: 14, borderRadius: "var(--radius-md)", border: "1px solid var(--border-subtle)" }}>
+            <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.03rem", marginBottom: 6 }}>Minutos</div>
+            <div style={{ fontSize: 18, fontWeight: 700, color: "#fbbf24" }}>{stats.mins}</div>
+          </div>
+        </div>
+
+        {/* IG Accounts */}
+        {igAccounts.length > 0 && (
+          <div style={{ borderTop: "1px solid var(--border-subtle)", paddingTop: 14, marginBottom: 14 }}>
+            <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.05rem", marginBottom: 8 }}>Cuentas IG</div>
+            <div className="flex flex-wrap gap-1.5">
+              {igAccounts.map(a => (
+                <span key={a.id} className="px-2.5 py-1 rounded-md text-xs font-medium" style={{ background: "rgba(34,197,94,0.1)", color: "var(--accent)", border: "1px solid rgba(34,197,94,0.2)" }}>@{a.username}</span>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Launch Warmup button */}
+        <button onClick={() => setExpanded(!expanded)} className="w-full flex items-center justify-center gap-2 py-3 rounded-lg font-bold text-sm transition-all" style={{ background: expanded ? "var(--bg-hover)" : "linear-gradient(135deg, var(--accent) 0%, var(--accent-hover) 100%)", border: `1px solid ${expanded ? "var(--border-default)" : "var(--accent)"}`, color: expanded ? "var(--text-primary)" : "#000", cursor: "pointer" }}>
+          <IconFlame /> {isActive ? "En curso..." : expanded ? "Cancelar" : "Launch Warmup"}
+        </button>
+
+        {/* Expanded warmup panel */}
+        {expanded && !isActive && (
+          <div style={{ marginTop: 14, paddingTop: 14, borderTop: "1px solid var(--border-subtle)" }}>
+            {/* Account selector */}
+            <div className="mb-3">
+              <label className="block mb-1.5 text-xs font-medium" style={{ color: "var(--text-secondary)" }}>Cuenta</label>
+              {igAccounts.length > 0 ? (
+                <select value={account} onChange={e => setAccount(e.target.value)} className="w-full rounded-lg px-3 py-2.5 text-sm" style={{ background: "var(--bg-elevated)", border: "1px solid var(--border-subtle)", color: "var(--text-primary)" }}>
+                  {igAccounts.map(a => <option key={a.id} value={a.username}>@{a.username}</option>)}
+                </select>
+              ) : (
+                <input type="text" placeholder="@username" value={account} onChange={e => setAccount(e.target.value)} className="w-full rounded-lg px-3 py-2.5 text-sm" style={{ background: "var(--bg-elevated)", border: "1px solid var(--border-subtle)", color: "var(--text-primary)" }} />
+              )}
+            </div>
+            {/* Duration chips */}
+            <div className="mb-3">
+              <label className="block mb-1.5 text-xs font-medium" style={{ color: "var(--text-secondary)" }}>Duración</label>
+              <div className="flex gap-2">{["2", "5", "10", "20"].map(dm => (
+                <button key={dm} onClick={() => setDuration(dm)} className="flex-1 py-2 rounded-lg text-sm font-medium" style={duration === dm ? { background: "var(--accent)", color: "#000", border: "1px solid var(--accent)" } : { background: "var(--bg-elevated)", border: "1px solid var(--border-subtle)", color: "var(--text-secondary)", cursor: "pointer" }}>{dm}m</button>
+              ))}</div>
+            </div>
+            {/* Launch */}
+            <button onClick={launch} disabled={sending || !account} className="w-full flex items-center justify-center gap-2 py-3 rounded-lg font-bold text-sm transition-all hover:brightness-110 disabled:opacity-40" style={{ background: "var(--accent)", border: "1px solid var(--accent)", color: "#000", cursor: "pointer" }}>
+              {sending ? "Lanzando..." : "Confirmar"}
+            </button>
+            {msg && <p className="text-sm text-center mt-2" style={{ color: msg.startsWith("Error") ? "var(--error)" : "var(--accent)" }}>{msg}</p>}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Fleet Page (uses DeviceCard) ─────────────────────────
 function FleetPage({ devices, loading, onRefresh, token }: { devices: Device[]; loading: boolean; onRefresh: () => void; token: string }) {
-  const [igAccounts, setIgAccounts] = useState<Record<number, IGAccount[]>>({});
+  const [igAccountsMap, setIgAccountsMap] = useState<Record<number, IGAccount[]>>({});
   const [sessions, setSessions] = useState<Session[]>([]);
 
-  // Load IG accounts and recent sessions per device
-  useEffect(() => {
+  const loadExtra = useCallback(() => {
     if (!token) return;
     devices.forEach(d => {
       apiGet(`/api/ig-accounts?device_id=${d.id}`, token).then(data => {
-        setIgAccounts(prev => ({ ...prev, [d.id]: data.accounts || [] }));
+        setIgAccountsMap(prev => ({ ...prev, [d.id]: data.accounts || [] }));
       }).catch(() => {});
     });
     apiGet("/api/warmup-sessions", token).then(data => {
@@ -419,34 +563,14 @@ function FleetPage({ devices, loading, onRefresh, token }: { devices: Device[]; 
     }).catch(() => {});
   }, [devices, token]);
 
-  // @ts-ignore
-  const getDeviceStats = (deviceId: number) => {
-    const devSessions = sessions.filter(s => {
-      const acc = igAccounts[deviceId] || [];
-      return acc.some(a => a.username === s.account);
-    });
-    const total = devSessions.length;
-    const reels = devSessions.reduce((s, x) => s + (x.reels_viewed || 0), 0);
-    const likes = devSessions.reduce((s, x) => s + (x.likes || 0), 0);
-    const mins = Math.round(devSessions.reduce((s, x) => s + (x.elapsed_sec || 0), 0) / 60);
-    return { total, reels, likes, mins };
-  };
-
-  const lastSession = (deviceId: number) => {
-    const acc = igAccounts[deviceId] || [];
-    if (acc.length === 0) return null;
-    const accNames = acc.map(a => a.username);
-    return sessions.filter(s => accNames.includes(s.account)).sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())[0] || null;
-  };
+  useEffect(() => { loadExtra(); }, [loadExtra]);
 
   return (
     <div>
-      {/* Desktop header */}
       <div className="hidden lg:block" style={{ marginBottom: 28 }}>
         <h2 style={{ fontSize: 26, fontWeight: 700, letterSpacing: -0.5, marginBottom: 6 }}>Device Fleet</h2>
-        <p style={{ color: "var(--text-secondary)", fontSize: 14 }}>Monitor and control your devices</p>
+        <p style={{ color: "var(--text-secondary)", fontSize: 14 }}>Monitor, control and launch warmups on your devices</p>
       </div>
-      {/* Mobile header */}
       <div className="lg:hidden flex justify-between items-center mb-6">
         <h1 className="text-xl font-bold">Fleet</h1>
         <button onClick={onRefresh} className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg" style={{ border: "1px solid var(--border-default)", background: "var(--bg-elevated)", color: "var(--text-secondary)", cursor: "pointer" }}>
@@ -454,9 +578,7 @@ function FleetPage({ devices, loading, onRefresh, token }: { devices: Device[]; 
         </button>
       </div>
 
-      {/* Glass card container */}
-      <div className="glass-card" style={{ border: "1px solid var(--glass-border)", borderRadius: "var(--radius-lg)", overflow: "hidden" }}>
-        {/* Card header */}
+      <div style={{ border: "1px solid var(--glass-border)", borderRadius: "var(--radius-lg)", overflow: "hidden" }}>
         <div className="flex items-center justify-between px-5 py-4" style={{ borderBottom: "1px solid var(--border-subtle)" }}>
           <div className="flex items-center gap-2.5">
             <span style={{ color: "var(--accent)" }}><IconPhone /></span>
@@ -464,13 +586,12 @@ function FleetPage({ devices, loading, onRefresh, token }: { devices: Device[]; 
           </div>
           <div className="flex items-center gap-2.5">
             <span className="px-2.5 py-1 rounded-full text-xs font-bold" style={{ background: "var(--success-dim)", color: "var(--success)" }}>{devices.length} online</span>
-            <button onClick={onRefresh} className="hidden lg:flex items-center gap-1.5" style={{ padding: "7px 12px", fontSize: 12, fontWeight: 600, borderRadius: "var(--radius-md)", border: "1px solid var(--border-default)", background: "var(--bg-elevated)", color: "var(--text-primary)", cursor: "pointer", transition: "all 0.15s" }}>
+            <button onClick={onRefresh} className="hidden lg:flex items-center gap-1.5" style={{ padding: "7px 12px", fontSize: 12, fontWeight: 600, borderRadius: "var(--radius-md)", border: "1px solid var(--border-default)", background: "var(--bg-elevated)", color: "var(--text-primary)", cursor: "pointer" }}>
               <IconRefresh /> Refresh
             </button>
           </div>
         </div>
 
-        {/* Device grid */}
         <div className="p-5">
           {devices.length === 0 ? (
             <div className="flex flex-col items-center py-16" style={{ color: "var(--text-muted)" }}>
@@ -480,106 +601,9 @@ function FleetPage({ devices, loading, onRefresh, token }: { devices: Device[]; 
             </div>
           ) : (
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(340px, 1fr))", gap: 20 }}>
-              {devices.map(d => {
-                const stats = getDeviceStats(d.id);
-                const last = lastSession(d.id);
-                const accounts = igAccounts[d.id] || [];
-                const isActive = last && last.status === "running";
-
-                return (
-                  <div key={d.id} style={{ position: "relative", borderRadius: "var(--radius-lg)", padding: isActive ? 2 : 0, overflow: "hidden" }}>
-                    {/* Spinning border for active devices */}
-                    {isActive && (
-                      <div style={{ position: "absolute", top: "50%", left: "50%", width: "200%", height: "200%", transform: "translate(-50%, -50%)", background: "conic-gradient(from 0deg, transparent 0%, #22c55e 10%, #3b82f6 20%, #a855f7 30%, #22c55e 40%, transparent 50%)", animation: "borderSpin 3s linear infinite", zIndex: 0 }} />
-                    )}
-                    {/* Card */}
-                    <div className="device-card-inner" style={{
-                      background: "linear-gradient(145deg, var(--bg-elevated) 0%, var(--bg-surface) 100%)",
-                      border: isActive ? "none" : "1px solid var(--border-subtle)",
-                      borderRadius: "var(--radius-lg)",
-                      padding: 22,
-                      position: "relative",
-                      overflow: "hidden",
-                      zIndex: 1,
-                      transition: "all 0.25s ease",
-                      boxShadow: isActive ? "0 0 12px rgba(34,197,94,0.2)" : "none",
-                    }}
-                    onMouseEnter={e => { if (!isActive) { e.currentTarget.style.borderColor = "var(--border-default)"; e.currentTarget.style.transform = "translateY(-3px)"; e.currentTarget.style.boxShadow = "var(--shadow-lg)"; } }}
-                    onMouseLeave={e => { if (!isActive) { e.currentTarget.style.borderColor = "var(--border-subtle)"; e.currentTarget.style.transform = "none"; e.currentTarget.style.boxShadow = "none"; } }}
-                    >
-                      {/* Green glow overlay */}
-                      <div style={{ position: "absolute", top: "-50%", right: "-50%", width: "100%", height: "100%", background: "radial-gradient(circle, rgba(34,197,94,0.06) 0%, transparent 60%)", pointerEvents: "none" }} />
-
-                      {/* Device header */}
-                      <div className="flex items-center justify-between" style={{ marginBottom: 18 }}>
-                        <div className="flex items-center gap-3">
-                          <div className="flex items-center justify-center" style={{ width: 48, height: 48, borderRadius: "var(--radius-md)", background: "var(--bg-active)" }}>
-                            <IconPhone />
-                          </div>
-                          <div>
-                            <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 2 }}>{d.device_name || "Unknown Device"}</div>
-                            <div style={{ fontSize: 12, color: "var(--text-muted)" }}>Android {d.android_version || "?"} · {d.device_id.slice(0, 12)}</div>
-                          </div>
-                        </div>
-                        <span className={`px-3 py-1.5 rounded-full font-bold uppercase tracking-wide`} style={{ fontSize: 11, letterSpacing: 0.3, background: "var(--success-dim)", color: "var(--success)", boxShadow: "0 0 12px var(--success-dim)" }}>
-                          <span className="pulse-dot inline-block mr-1" style={{ width: 6, height: 6, borderRadius: "50%", background: "currentColor" }} /> Online
-                        </span>
-                      </div>
-
-                      {/* Activity badge */}
-                      <div className="flex items-center gap-2" style={{ marginBottom: 14 }}>
-                        {isActive ? (
-                          <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg" style={{ fontSize: 14, fontWeight: 600, background: "rgba(249,115,22,0.15)", color: "#f97316", border: "1px solid rgba(249,115,22,0.3)", animation: "activityPulse 2s ease-in-out infinite" }}>
-                            <span style={{ width: 6, height: 6, borderRadius: "50%", background: "currentColor", animation: "dotPulse 1.5s ease-in-out infinite" }} />
-                            Warmup en curso
-                          </div>
-                        ) : last ? (
-                          <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg" style={{ fontSize: 13, fontWeight: 600, background: "rgba(34,197,94,0.1)", color: "var(--success)", border: "1px solid rgba(34,197,94,0.2)" }}>
-                            <span className="pulse-dot" style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--success)" }} />
-                            Listo
-                          </div>
-                        ) : (
-                          <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg" style={{ fontSize: 13, fontWeight: 600, background: "rgba(255,255,255,0.05)", color: "var(--text-muted)", border: "1px solid var(--border-subtle)" }}>
-                            Sin actividad
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Stats grid (2x2 like Granja Sur) */}
-                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 16 }}>
-                        <div style={{ background: "var(--bg-base)", padding: 14, borderRadius: "var(--radius-md)", border: "1px solid var(--border-subtle)" }}>
-                          <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.03rem", marginBottom: 6 }}>Sesiones</div>
-                          <div style={{ fontSize: 18, fontWeight: 700, color: "var(--accent)" }}>{stats.total}</div>
-                        </div>
-                        <div style={{ background: "var(--bg-base)", padding: 14, borderRadius: "var(--radius-md)", border: "1px solid var(--border-subtle)" }}>
-                          <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.03rem", marginBottom: 6 }}>Reels</div>
-                          <div style={{ fontSize: 18, fontWeight: 700, color: "#60a5fa" }}>{stats.reels}</div>
-                        </div>
-                        <div style={{ background: "var(--bg-base)", padding: 14, borderRadius: "var(--radius-md)", border: "1px solid var(--border-subtle)" }}>
-                          <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.03rem", marginBottom: 6 }}>Likes</div>
-                          <div style={{ fontSize: 18, fontWeight: 700, color: "#f472b6" }}>{stats.likes}</div>
-                        </div>
-                        <div style={{ background: "var(--bg-base)", padding: 14, borderRadius: "var(--radius-md)", border: "1px solid var(--border-subtle)" }}>
-                          <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.03rem", marginBottom: 6 }}>Minutos</div>
-                          <div style={{ fontSize: 18, fontWeight: 700, color: "#fbbf24" }}>{stats.mins}</div>
-                        </div>
-                      </div>
-
-                      {/* IG Accounts */}
-                      {accounts.length > 0 && (
-                        <div style={{ borderTop: "1px solid var(--border-subtle)", paddingTop: 14 }}>
-                          <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.05rem", marginBottom: 8 }}>Cuentas IG</div>
-                          <div className="flex flex-wrap gap-1.5">
-                            {accounts.map(a => (
-                              <span key={a.id} className="px-2.5 py-1 rounded-md text-xs font-medium" style={{ background: "rgba(34,197,94,0.1)", color: "var(--accent)", border: "1px solid rgba(34,197,94,0.2)" }}>@{a.username}</span>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
+              {devices.map(d => (
+                <DeviceCard key={d.id} d={d} token={token} igAccounts={igAccountsMap[d.id] || []} sessions={sessions} onLaunched={loadExtra} />
+              ))}
             </div>
           )}
         </div>
@@ -589,93 +613,6 @@ function FleetPage({ devices, loading, onRefresh, token }: { devices: Device[]; 
 }
 
 // ─── Warmup Page ───────────────────────────────────────
-function WarmupPage({ devices, token }: { devices: Device[]; token: string }) {
-  const [account, setAccount] = useState("");
-  const [duration, setDuration] = useState("2");
-  const [sending, setSending] = useState(false);
-  const [msg, setMsg] = useState("");
-  const [igAccounts, setIgAccounts] = useState<IGAccount[]>([]);
-  const [selectedDevice, setSelectedDevice] = useState<number>(devices[0]?.id || 0);
-
-  useEffect(() => {
-    if (selectedDevice) {
-      apiGet(`/api/ig-accounts?device_id=${selectedDevice}`, token).then((data) => {
-        setIgAccounts(data.accounts || []);
-        if ((data.accounts || []).length > 0) setAccount(data.accounts[0].username);
-      });
-    }
-  }, [selectedDevice, token]);
-
-  const launch = async () => {
-    if (!account || devices.length === 0) return;
-    setSending(true); setMsg("");
-    try {
-      const headers: Record<string, string> = { "Content-Type": "application/json" };
-      const t = localStorage.getItem("token");
-      if (t) headers["Authorization"] = `Bearer ${t}`;
-      const res = await fetch(`${API}/api/tasks/run`, { method: "POST", headers, body: JSON.stringify({ task_type: "warmup_ig", device_id: selectedDevice || devices[0].id, params: { account, duration_minutes: parseInt(duration) } }) });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Error");
-      setMsg(`Warmup encolado (ID: ${data.task_run.id})`);
-    } catch (e) { setMsg(`Error: ${e instanceof Error ? e.message : "desconocido"}`); } finally { setSending(false); }
-  };
-
-  const selStyle = { background: "var(--bg-elevated)", border: "1px solid var(--border-subtle)", color: "var(--text-primary)" };
-
-  return (
-    <div>
-      <div className="hidden lg:block" style={{ marginBottom: 28 }}>
-        <h2 style={{ fontSize: 26, fontWeight: 700, letterSpacing: -0.5, marginBottom: 6 }}>Warmup</h2>
-        <p style={{ color: "var(--text-secondary)", fontSize: 14 }}>Launch IG warmup sessions on your devices</p>
-      </div>
-      <div className="lg:hidden flex justify-between items-center mb-6">
-        <h1 className="text-xl font-bold">Warmup</h1>
-      </div>
-
-      {devices.length === 0 ? (
-        <GlassCard>
-          <div className="flex flex-col items-center py-16" style={{ color: "var(--text-muted)" }}>
-            <div style={{ fontSize: 48, marginBottom: 16, opacity: 0.5 }}><IconPhone /></div>
-            <p className="font-medium mb-1" style={{ color: "var(--text-secondary)" }}>No devices available</p>
-            <p className="text-sm">Connect a phone first</p>
-          </div>
-        </GlassCard>
-      ) : (
-        <GlassCard title="Launch Warmup" icon={<IconFlame />}>
-          <div className="space-y-5">
-            <div>
-              <label className="block mb-1.5 text-xs font-medium" style={{ color: "var(--text-secondary)" }}>Device</label>
-              <select value={selectedDevice} onChange={(e) => setSelectedDevice(Number(e.target.value))} className="w-full rounded-[var(--radius-md)] px-4 py-3 text-sm" style={selStyle}>
-                {devices.map((d) => <option key={d.id} value={d.id}>{d.device_name || d.device_id.slice(0, 16)}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="block mb-1.5 text-xs font-medium" style={{ color: "var(--text-secondary)" }}>Instagram Account</label>
-              {igAccounts.length > 0 ? (
-                <select value={account} onChange={(e) => setAccount(e.target.value)} className="w-full rounded-[var(--radius-md)] px-4 py-3 text-sm" style={selStyle}>
-                  {igAccounts.map((a) => <option key={a.id} value={a.username}>@{a.username}</option>)}
-                </select>
-              ) : (
-                <input type="text" placeholder="@username" value={account} onChange={(e) => setAccount(e.target.value)} className="w-full rounded-[var(--radius-md)] px-4 py-3 text-sm placeholder-zinc-600" style={{ background: "var(--bg-elevated)", border: "1px solid var(--border-subtle)", color: "var(--text-primary)" }} />
-              )}
-            </div>
-            <div>
-              <label className="block mb-1.5 text-xs font-medium" style={{ color: "var(--text-secondary)" }}>Duration</label>
-              <div className="flex gap-2">{["2", "5", "10", "20"].map((d) => (
-                <button key={d} onClick={() => setDuration(d)} className="flex-1 py-2.5 rounded-[var(--radius-md)] text-sm font-medium transition-all" style={duration === d ? { background: "var(--accent)", color: "#000", border: "1px solid var(--accent)" } : { background: "var(--bg-elevated)", border: "1px solid var(--border-subtle)", color: "var(--text-secondary)", cursor: "pointer" }}>{d}m</button>
-              ))}</div>
-            </div>
-            <button onClick={launch} disabled={sending || !account} className="w-full flex items-center justify-center gap-2 py-3.5 rounded-[var(--radius-md)] font-bold text-sm transition-all hover:brightness-110 disabled:opacity-40" style={{ background: "linear-gradient(135deg, var(--accent) 0%, var(--accent-hover) 100%)", border: "1px solid var(--accent)", color: "#000" }}>
-              <IconFlame /> {sending ? "Launching..." : "Launch Warmup"}
-            </button>
-            {msg && <p className="text-sm text-center" style={{ color: msg.startsWith("Error") ? "var(--error)" : "var(--accent)" }}>{msg}</p>}
-          </div>
-        </GlassCard>
-      )}
-    </div>
-  );
-}
-
 // ─── History Page ──────────────────────────────────────
 function HistoryPage({ sessions }: { sessions: Session[] }) {
   const tR = sessions.reduce((s, r) => s + (r.reels_viewed || 0), 0);
@@ -796,7 +733,7 @@ export default function Home() {
 
   const logout = () => { localStorage.removeItem("token"); localStorage.removeItem("userName"); setToken(null); };
 
-  const pageTitles: Record<Page, string> = { dashboard: "Dashboard", fleet: "Fleet", warmup: "Warmup", history: "History", settings: "Settings" };
+  const pageTitles: Record<Page, string> = { dashboard: "Dashboard", fleet: "Fleet", history: "History", settings: "Settings" };
 
   return (
     <div className="flex h-screen overflow-hidden">
@@ -806,7 +743,7 @@ export default function Home() {
         <main className="flex-1 overflow-y-auto p-5 lg:p-7 pb-24 lg:pb-7" style={{ scrollBehavior: "smooth" }}>
           {page === "dashboard" && <DashboardPage sessions={sessions} devices={devices} />}
           {page === "fleet" && <FleetPage devices={devices} loading={loading} onRefresh={() => loadData(token!)} token={token!} />}
-          {page === "warmup" && <WarmupPage devices={devices} token={token!} />}
+          
           {page === "history" && <HistoryPage sessions={sessions} />}
           {page === "settings" && <SettingsPage userName={userName} onLogout={logout} />}
         </main>
