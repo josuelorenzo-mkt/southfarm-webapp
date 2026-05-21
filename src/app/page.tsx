@@ -401,82 +401,189 @@ function DashboardPage({ sessions, devices }: { sessions: Session[]; devices: De
   );
 }
 
-// ─── Fleet Page ────────────────────────────────────────
-function FleetPage({ devices, loading, onRefresh }: { devices: Device[]; loading: boolean; onRefresh: () => void }) {
+// ─── Fleet Page (Granja Sur style) ─────────────────────────
+function FleetPage({ devices, loading, onRefresh, token }: { devices: Device[]; loading: boolean; onRefresh: () => void; token: string }) {
+  const [igAccounts, setIgAccounts] = useState<Record<number, IGAccount[]>>({});
+  const [sessions, setSessions] = useState<Session[]>([]);
+
+  // Load IG accounts and recent sessions per device
+  useEffect(() => {
+    if (!token) return;
+    devices.forEach(d => {
+      apiGet(`/api/ig-accounts?device_id=${d.id}`, token).then(data => {
+        setIgAccounts(prev => ({ ...prev, [d.id]: data.accounts || [] }));
+      }).catch(() => {});
+    });
+    apiGet("/api/warmup-sessions", token).then(data => {
+      setSessions(data.sessions || data || []);
+    }).catch(() => {});
+  }, [devices, token]);
+
+  // @ts-ignore
+  const getDeviceStats = (deviceId: number) => {
+    const devSessions = sessions.filter(s => {
+      const acc = igAccounts[deviceId] || [];
+      return acc.some(a => a.username === s.account);
+    });
+    const total = devSessions.length;
+    const reels = devSessions.reduce((s, x) => s + (x.reels_viewed || 0), 0);
+    const likes = devSessions.reduce((s, x) => s + (x.likes || 0), 0);
+    const mins = Math.round(devSessions.reduce((s, x) => s + (x.elapsed_sec || 0), 0) / 60);
+    return { total, reels, likes, mins };
+  };
+
+  const lastSession = (deviceId: number) => {
+    const acc = igAccounts[deviceId] || [];
+    if (acc.length === 0) return null;
+    const accNames = acc.map(a => a.username);
+    return sessions.filter(s => accNames.includes(s.account)).sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())[0] || null;
+  };
+
   return (
     <div>
+      {/* Desktop header */}
       <div className="hidden lg:block" style={{ marginBottom: 28 }}>
         <h2 style={{ fontSize: 26, fontWeight: 700, letterSpacing: -0.5, marginBottom: 6 }}>Device Fleet</h2>
         <p style={{ color: "var(--text-secondary)", fontSize: 14 }}>Monitor and control your devices</p>
       </div>
+      {/* Mobile header */}
       <div className="lg:hidden flex justify-between items-center mb-6">
         <h1 className="text-xl font-bold">Fleet</h1>
-        <button onClick={onRefresh} className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-[var(--radius-md)]" style={{ border: "1px solid var(--border-default)", background: "var(--bg-elevated)", color: "var(--text-secondary)", cursor: "pointer" }}>
+        <button onClick={onRefresh} className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg" style={{ border: "1px solid var(--border-default)", background: "var(--bg-elevated)", color: "var(--text-secondary)", cursor: "pointer" }}>
           {loading ? "..." : <><IconRefresh /> Refresh</>}
         </button>
       </div>
 
-      <GlassCard
-        title="Connected Devices"
-        icon={<IconPhone />}
-        actions={
+      {/* Glass card container */}
+      <div className="glass-card" style={{ border: "1px solid var(--glass-border)", borderRadius: "var(--radius-lg)", overflow: "hidden" }}>
+        {/* Card header */}
+        <div className="flex items-center justify-between px-5 py-4" style={{ borderBottom: "1px solid var(--border-subtle)" }}>
           <div className="flex items-center gap-2.5">
-            <Badge color="success">{devices.length} online</Badge>
-            <button onClick={onRefresh} className="hidden lg:flex items-center gap-1.5" style={{ padding: "7px 12px", fontSize: 12, fontWeight: 600, borderRadius: "var(--radius-md)", border: "1px solid var(--border-default)", background: "var(--bg-elevated)", color: "var(--text-primary)", cursor: "pointer" }}>
+            <span style={{ color: "var(--accent)" }}><IconPhone /></span>
+            <h3 className="font-semibold" style={{ fontSize: 15 }}>Connected Devices</h3>
+          </div>
+          <div className="flex items-center gap-2.5">
+            <span className="px-2.5 py-1 rounded-full text-xs font-bold" style={{ background: "var(--success-dim)", color: "var(--success)" }}>{devices.length} online</span>
+            <button onClick={onRefresh} className="hidden lg:flex items-center gap-1.5" style={{ padding: "7px 12px", fontSize: 12, fontWeight: 600, borderRadius: "var(--radius-md)", border: "1px solid var(--border-default)", background: "var(--bg-elevated)", color: "var(--text-primary)", cursor: "pointer", transition: "all 0.15s" }}>
               <IconRefresh /> Refresh
             </button>
           </div>
-        }
-        noPadding
-      >
-        {devices.length === 0 ? (
-          <div className="flex flex-col items-center py-16" style={{ color: "var(--text-muted)" }}>
-            <div style={{ fontSize: 48, marginBottom: 16, opacity: 0.5 }}><IconPhone /></div>
-            <p className="font-medium mb-1" style={{ color: "var(--text-secondary)" }}>No devices connected</p>
-            <p className="text-sm">Install SouthFarm on an Android phone to get started</p>
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5 p-5" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(340px, 1fr))" }}>
-            {devices.map((d) => (
-              <div key={d.id} className="device-card-inner" style={{
-                background: "linear-gradient(145deg, var(--bg-elevated) 0%, var(--bg-surface) 100%)",
-                border: "1px solid var(--border-subtle)",
-                borderRadius: "var(--radius-lg)",
-                padding: 22,
-                transition: "all 0.25s ease",
-                position: "relative",
-                overflow: "hidden",
-              }}
-              onMouseEnter={e => { e.currentTarget.style.borderColor = "var(--border-default)"; e.currentTarget.style.transform = "translateY(-3px)"; e.currentTarget.style.boxShadow = "var(--shadow-lg)"; }}
-              onMouseLeave={e => { e.currentTarget.style.borderColor = "var(--border-subtle)"; e.currentTarget.style.transform = "none"; e.currentTarget.style.boxShadow = "none"; }}
-              >
-                {/* Glow */}
-                <div style={{ position: "absolute", top: "-50%", right: "-50%", width: "100%", height: "100%", background: "radial-gradient(circle, rgba(34,197,94,0.06) 0%, transparent 60%)", pointerEvents: "none" }} />
+        </div>
 
-                {/* Header */}
-                <div className="flex items-center justify-between mb-4">
-                  <div className="flex items-center gap-3">
-                    <div className="flex items-center justify-center" style={{ width: 42, height: 42, borderRadius: "var(--radius-md)", background: "var(--success-dim)", color: "var(--accent)" }}>
-                      <IconPhone />
-                    </div>
-                    <div>
-                      <div className="font-semibold" style={{ fontSize: 15 }}>{d.device_name || "Unknown Device"}</div>
-                      <div style={{ fontSize: 12, color: "var(--text-muted)" }}>Android {d.android_version || "?"}</div>
+        {/* Device grid */}
+        <div className="p-5">
+          {devices.length === 0 ? (
+            <div className="flex flex-col items-center py-16" style={{ color: "var(--text-muted)" }}>
+              <div style={{ marginBottom: 16, opacity: 0.5 }}><IconPhone /></div>
+              <p className="font-medium mb-1" style={{ color: "var(--text-secondary)" }}>No devices connected</p>
+              <p className="text-sm">Install SouthFarm on an Android phone to get started</p>
+            </div>
+          ) : (
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(340px, 1fr))", gap: 20 }}>
+              {devices.map(d => {
+                const stats = getDeviceStats(d.id);
+                const last = lastSession(d.id);
+                const accounts = igAccounts[d.id] || [];
+                const isActive = last && last.status === "running";
+
+                return (
+                  <div key={d.id} style={{ position: "relative", borderRadius: "var(--radius-lg)", padding: isActive ? 2 : 0, overflow: "hidden" }}>
+                    {/* Spinning border for active devices */}
+                    {isActive && (
+                      <div style={{ position: "absolute", top: "50%", left: "50%", width: "200%", height: "200%", transform: "translate(-50%, -50%)", background: "conic-gradient(from 0deg, transparent 0%, #22c55e 10%, #3b82f6 20%, #a855f7 30%, #22c55e 40%, transparent 50%)", animation: "borderSpin 3s linear infinite", zIndex: 0 }} />
+                    )}
+                    {/* Card */}
+                    <div className="device-card-inner" style={{
+                      background: "linear-gradient(145deg, var(--bg-elevated) 0%, var(--bg-surface) 100%)",
+                      border: isActive ? "none" : "1px solid var(--border-subtle)",
+                      borderRadius: "var(--radius-lg)",
+                      padding: 22,
+                      position: "relative",
+                      overflow: "hidden",
+                      zIndex: 1,
+                      transition: "all 0.25s ease",
+                      boxShadow: isActive ? "0 0 12px rgba(34,197,94,0.2)" : "none",
+                    }}
+                    onMouseEnter={e => { if (!isActive) { e.currentTarget.style.borderColor = "var(--border-default)"; e.currentTarget.style.transform = "translateY(-3px)"; e.currentTarget.style.boxShadow = "var(--shadow-lg)"; } }}
+                    onMouseLeave={e => { if (!isActive) { e.currentTarget.style.borderColor = "var(--border-subtle)"; e.currentTarget.style.transform = "none"; e.currentTarget.style.boxShadow = "none"; } }}
+                    >
+                      {/* Green glow overlay */}
+                      <div style={{ position: "absolute", top: "-50%", right: "-50%", width: "100%", height: "100%", background: "radial-gradient(circle, rgba(34,197,94,0.06) 0%, transparent 60%)", pointerEvents: "none" }} />
+
+                      {/* Device header */}
+                      <div className="flex items-center justify-between" style={{ marginBottom: 18 }}>
+                        <div className="flex items-center gap-3">
+                          <div className="flex items-center justify-center" style={{ width: 48, height: 48, borderRadius: "var(--radius-md)", background: "var(--bg-active)" }}>
+                            <IconPhone />
+                          </div>
+                          <div>
+                            <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 2 }}>{d.device_name || "Unknown Device"}</div>
+                            <div style={{ fontSize: 12, color: "var(--text-muted)" }}>Android {d.android_version || "?"} · {d.device_id.slice(0, 12)}</div>
+                          </div>
+                        </div>
+                        <span className={`px-3 py-1.5 rounded-full font-bold uppercase tracking-wide`} style={{ fontSize: 11, letterSpacing: 0.3, background: "var(--success-dim)", color: "var(--success)", boxShadow: "0 0 12px var(--success-dim)" }}>
+                          <span className="pulse-dot inline-block mr-1" style={{ width: 6, height: 6, borderRadius: "50%", background: "currentColor" }} /> Online
+                        </span>
+                      </div>
+
+                      {/* Activity badge */}
+                      <div className="flex items-center gap-2" style={{ marginBottom: 14 }}>
+                        {isActive ? (
+                          <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg" style={{ fontSize: 14, fontWeight: 600, background: "rgba(249,115,22,0.15)", color: "#f97316", border: "1px solid rgba(249,115,22,0.3)", animation: "activityPulse 2s ease-in-out infinite" }}>
+                            <span style={{ width: 6, height: 6, borderRadius: "50%", background: "currentColor", animation: "dotPulse 1.5s ease-in-out infinite" }} />
+                            Warmup en curso
+                          </div>
+                        ) : last ? (
+                          <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg" style={{ fontSize: 13, fontWeight: 600, background: "rgba(34,197,94,0.1)", color: "var(--success)", border: "1px solid rgba(34,197,94,0.2)" }}>
+                            <span className="pulse-dot" style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--success)" }} />
+                            Listo
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg" style={{ fontSize: 13, fontWeight: 600, background: "rgba(255,255,255,0.05)", color: "var(--text-muted)", border: "1px solid var(--border-subtle)" }}>
+                            Sin actividad
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Stats grid (2x2 like Granja Sur) */}
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 16 }}>
+                        <div style={{ background: "var(--bg-base)", padding: 14, borderRadius: "var(--radius-md)", border: "1px solid var(--border-subtle)" }}>
+                          <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.03rem", marginBottom: 6 }}>Sesiones</div>
+                          <div style={{ fontSize: 18, fontWeight: 700, color: "var(--accent)" }}>{stats.total}</div>
+                        </div>
+                        <div style={{ background: "var(--bg-base)", padding: 14, borderRadius: "var(--radius-md)", border: "1px solid var(--border-subtle)" }}>
+                          <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.03rem", marginBottom: 6 }}>Reels</div>
+                          <div style={{ fontSize: 18, fontWeight: 700, color: "#60a5fa" }}>{stats.reels}</div>
+                        </div>
+                        <div style={{ background: "var(--bg-base)", padding: 14, borderRadius: "var(--radius-md)", border: "1px solid var(--border-subtle)" }}>
+                          <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.03rem", marginBottom: 6 }}>Likes</div>
+                          <div style={{ fontSize: 18, fontWeight: 700, color: "#f472b6" }}>{stats.likes}</div>
+                        </div>
+                        <div style={{ background: "var(--bg-base)", padding: 14, borderRadius: "var(--radius-md)", border: "1px solid var(--border-subtle)" }}>
+                          <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.03rem", marginBottom: 6 }}>Minutos</div>
+                          <div style={{ fontSize: 18, fontWeight: 700, color: "#fbbf24" }}>{stats.mins}</div>
+                        </div>
+                      </div>
+
+                      {/* IG Accounts */}
+                      {accounts.length > 0 && (
+                        <div style={{ borderTop: "1px solid var(--border-subtle)", paddingTop: 14 }}>
+                          <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.05rem", marginBottom: 8 }}>Cuentas IG</div>
+                          <div className="flex flex-wrap gap-1.5">
+                            {accounts.map(a => (
+                              <span key={a.id} className="px-2.5 py-1 rounded-md text-xs font-medium" style={{ background: "rgba(34,197,94,0.1)", color: "var(--accent)", border: "1px solid rgba(34,197,94,0.2)" }}>@{a.username}</span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   </div>
-                  <span className="pulse-dot" style={{ width: 10, height: 10, borderRadius: "50%", background: "var(--success)", boxShadow: "0 0 8px var(--success)" }} />
-                </div>
-
-                {/* Meta */}
-                <div className="flex items-center gap-2 flex-wrap">
-                  <Badge color="success">Online</Badge>
-                  <span style={{ fontSize: 11, color: "var(--text-dim)" }}>{d.device_id.slice(0, 16)}</span>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </GlassCard>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
@@ -698,7 +805,7 @@ export default function Home() {
         <TopBar title={pageTitles[page]} onSync={() => loadData(token!)} loading={loading} />
         <main className="flex-1 overflow-y-auto p-5 lg:p-7 pb-24 lg:pb-7" style={{ scrollBehavior: "smooth" }}>
           {page === "dashboard" && <DashboardPage sessions={sessions} devices={devices} />}
-          {page === "fleet" && <FleetPage devices={devices} loading={loading} onRefresh={() => loadData(token!)} />}
+          {page === "fleet" && <FleetPage devices={devices} loading={loading} onRefresh={() => loadData(token!)} token={token!} />}
           {page === "warmup" && <WarmupPage devices={devices} token={token!} />}
           {page === "history" && <HistoryPage sessions={sessions} />}
           {page === "settings" && <SettingsPage userName={userName} onLogout={logout} />}
