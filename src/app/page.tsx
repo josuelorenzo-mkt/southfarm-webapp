@@ -428,27 +428,26 @@ function DeviceCard({ d, token, igAccounts, sessions, activeRun, onLaunched }: {
 
   const last = sessions.filter(s => igAccounts.some(a => a.username === s.account)).sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())[0] || null;
   const isActive = (() => {
-    if (!activeRun || (activeRun.status !== 'pending' && activeRun.status !== 'running')) return false;
-    const started = new Date(activeRun.created_at).getTime();
-    const params = JSON.parse(activeRun.params || '{}');
-    const durMin = params.duration_minutes || 2;
-    const totalMs = durMin * 60000;
-    // If more than 2x the duration has passed, consider it stale
-    if (Date.now() - started > totalMs * 2) return false;
+    if (!activeRun) return false;
+    const s = activeRun.status;
+    if (s !== 'pending' && s !== 'running' && s !== 'paused') return false;
+    if (!activeRun.created_at) return false;
     return true;
   })();
 
+  const isPaused = activeRun?.status === 'paused';
+
   // Timer calculation from active task_run
   const timerInfo = (() => {
-    if (!isActive || !activeRun) return null;
+    if (!isActive || !activeRun || !activeRun.created_at) return null;
     const started = new Date(activeRun.created_at).getTime();
     const params = JSON.parse(activeRun.params || '{}');
     const durMin = params.duration_minutes || 2;
     const totalMs = durMin * 60000;
-    const elapsedMs = now - started;
+    const elapsedMs = Math.max(0, now - started);
     const pct = Math.min(100, Math.max(0, (elapsedMs / totalMs) * 100));
     const elSec = Math.floor(elapsedMs / 1000);
-    return { pct, elapsed: elSec >= 60 ? `${Math.floor(elSec/60)}m ${elSec%60}s` : `${elSec}s`, durMin };
+    return { pct, elapsed: elSec >= 60 ? `${Math.floor(elSec/60)}m ${elSec%60}s` : `${elSec}s`, durMin, runId: activeRun.id };
   })();
 
   const launch = async () => {
@@ -463,6 +462,15 @@ function DeviceCard({ d, token, igAccounts, sessions, activeRun, onLaunched }: {
       onLaunched();
       setTimeout(() => { setExpanded(false); setMsg(""); }, 2000);
     } catch (e) { setMsg(`Error: ${e instanceof Error ? e.message : "desconocido"}`); } finally { setSending(false); }
+  };
+
+  const taskAction = async (action: string) => {
+    if (!activeRun) return;
+    try {
+      const headers: Record<string, string> = { "Content-Type": "application/json", Authorization: `Bearer ${token}` };
+      await fetch(`${API}/api/tasks/runs/${activeRun.id}/${action}`, { method: "PATCH", headers });
+      onLaunched();
+    } catch (e) {}
   };
 
   return (
@@ -495,8 +503,19 @@ function DeviceCard({ d, token, igAccounts, sessions, activeRun, onLaunched }: {
         <div style={{ marginBottom: 14 }}>
           <div className="flex items-center gap-2" style={{ marginBottom: isActive && timerInfo ? 8 : 0 }}>
             {isActive ? (
-              <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg" style={{ fontSize: 14, fontWeight: 600, background: "rgba(249,115,22,0.15)", color: "#f97316", border: "1px solid rgba(249,115,22,0.3)", animation: "activityPulse 2s ease-in-out infinite" }}>
-                <span style={{ width: 6, height: 6, borderRadius: "50%", background: "currentColor", animation: "dotPulse 1.5s ease-in-out infinite" }} /> Warmup en curso
+              <div className="flex items-center gap-2 flex-wrap">
+                <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg" style={{ fontSize: 14, fontWeight: 600, background: isPaused ? "rgba(59,130,246,0.15)" : "rgba(249,115,22,0.15)", color: isPaused ? "#3b82f6" : "#f97316", border: `1px solid ${isPaused ? "rgba(59,130,246,0.3)" : "rgba(249,115,22,0.3)"}`, animation: isPaused ? "none" : "activityPulse 2s ease-in-out infinite" }}>
+                  <span style={{ width: 6, height: 6, borderRadius: "50%", background: "currentColor", animation: isPaused ? "none" : "dotPulse 1.5s ease-in-out infinite" }} />
+                  {isPaused ? "Pausado" : "Warmup en curso"}
+                </div>
+                <div className="flex items-center gap-1.5">
+                  {isPaused ? (
+                    <button onClick={() => taskAction("resume")} className="flex items-center justify-center" style={{ width: 30, height: 30, borderRadius: "var(--radius-md)", border: "1px solid rgba(34,197,94,0.4)", background: "rgba(34,197,94,0.1)", color: "var(--accent)", cursor: "pointer", fontSize: 14, lineHeight: 1 }} title="Reanudar">▶</button>
+                  ) : (
+                    <button onClick={() => taskAction("pause")} className="flex items-center justify-center" style={{ width: 30, height: 30, borderRadius: "var(--radius-md)", border: "1px solid rgba(249,115,22,0.4)", background: "rgba(249,115,22,0.1)", color: "#f97316", cursor: "pointer", fontSize: 14, lineHeight: 1 }} title="Pausar">⏸</button>
+                  )}
+                  <button onClick={() => taskAction("stop")} className="flex items-center justify-center" style={{ width: 30, height: 30, borderRadius: "var(--radius-md)", border: "1px solid rgba(239,68,68,0.4)", background: "rgba(239,68,68,0.1)", color: "var(--error)", cursor: "pointer", fontSize: 14, lineHeight: 1 }} title="Detener">⏹</button>
+                </div>
               </div>
           ) : last ? (
             <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg" style={{ fontSize: 13, fontWeight: 600, background: "rgba(34,197,94,0.1)", color: "var(--success)", border: "1px solid rgba(34,197,94,0.2)" }}>
