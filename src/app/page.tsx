@@ -25,6 +25,7 @@ interface Session {
   elapsed_sec: number;
   status: string;
   timestamp: string;
+  duration_minutes?: number;
 }
 
 interface Device { id: number; device_id: string; device_name: string | null; android_version: string | null; created_at: string; }
@@ -401,7 +402,7 @@ function DashboardPage({ sessions, devices }: { sessions: Session[]; devices: De
 }
 
 // ─── Single Device Card (with inline warmup) ─────────────────
-function DeviceCard({ d, token, igAccounts, sessions, onLaunched }: { d: Device; token: string; igAccounts: IGAccount[]; sessions: Session[]; onLaunched: () => void }) {
+function DeviceCard({ d, token, igAccounts, sessions, activeRun, onLaunched }: { d: Device; token: string; igAccounts: IGAccount[]; sessions: Session[]; activeRun?: any; onLaunched: () => void }) {
   const [expanded, setExpanded] = useState(false);
   const [account, setAccount] = useState("");
   const [duration, setDuration] = useState("2");
@@ -426,22 +427,21 @@ function DeviceCard({ d, token, igAccounts, sessions, onLaunched }: { d: Device;
   })();
 
   const last = sessions.filter(s => igAccounts.some(a => a.username === s.account)).sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())[0] || null;
-  const isActive = last && last.status === "running";
+  const isActive = !!(activeRun && (activeRun.status === 'pending' || activeRun.status === 'running'));
 
-  // Timer calculation for active warmup
+  // Timer calculation from active task_run
   const timerInfo = (() => {
-    if (!isActive || !last) return null;
-    const started = new Date(last.timestamp).getTime();
-    const durMin = (last as any).duration_minutes || 2;
+    if (!isActive || !activeRun) return null;
+    const started = new Date(activeRun.created_at).getTime();
+    const params = JSON.parse(activeRun.params || '{}');
+    const durMin = params.duration_minutes || 2;
     const totalMs = durMin * 60000;
     const elapsedMs = now - started;
     const remainingMs = Math.max(0, totalMs - elapsedMs);
     const pct = Math.min(100, (elapsedMs / totalMs) * 100);
     const remMin = Math.floor(remainingMs / 60000);
     const remSec = Math.floor((remainingMs % 60000) / 1000);
-    const elMin = Math.floor(elapsedMs / 60000);
-    const elSec = Math.floor((elapsedMs % 60000) / 1000);
-    return { pct, elapsed: elMin > 0 ? `${elMin}m ${elSec}s` : `${elSec}s`, remaining: remMin > 0 ? `${remMin}m ${remSec}s` : `${remSec}s`, durMin };
+    return { pct, remaining: remMin > 0 ? `${remMin}m ${remSec}s` : `${remSec}s`, durMin };
   })();
 
   const launch = async () => {
@@ -505,10 +505,7 @@ function DeviceCard({ d, token, igAccounts, sessions, onLaunched }: { d: Device;
               <div style={{ width: "100%", height: 4, background: "rgba(255,255,255,0.08)", borderRadius: 2, overflow: "hidden" }}>
                 <div style={{ width: `${timerInfo.pct}%`, height: "100%", borderRadius: 2, background: "#f97316", transition: "width 1s linear" }} />
               </div>
-              <div className="flex justify-between" style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>
-                <span>{timerInfo.elapsed} transcurrido</span>
-                <span>{timerInfo.remaining} restante ({timerInfo.durMin}min)</span>
-              </div>
+              <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>{timerInfo.remaining} restante</div>
             </div>
           )}
         </div>
@@ -586,6 +583,7 @@ function DeviceCard({ d, token, igAccounts, sessions, onLaunched }: { d: Device;
 function FleetPage({ devices, loading, onRefresh, token }: { devices: Device[]; loading: boolean; onRefresh: () => void; token: string }) {
   const [igAccountsMap, setIgAccountsMap] = useState<Record<number, IGAccount[]>>({});
   const [sessions, setSessions] = useState<Session[]>([]);
+  const [activeRuns, setActiveRuns] = useState<Record<number, any>>({});
 
   const loadExtra = useCallback(() => {
     if (!token) return;
@@ -596,6 +594,16 @@ function FleetPage({ devices, loading, onRefresh, token }: { devices: Device[]; 
     });
     apiGet("/api/warmup-sessions", token).then(data => {
       setSessions(data.sessions || data || []);
+    }).catch(() => {});
+    // Fetch active task runs
+    apiGet("/api/tasks/runs", token).then(data => {
+      const active: Record<number, any> = {};
+      (data.runs || []).forEach((r: any) => {
+        if (r.status === "pending" || r.status === "running") {
+          active[r.device_id] = r;
+        }
+      });
+      setActiveRuns(active);
     }).catch(() => {});
   }, [devices, token]);
 
@@ -638,7 +646,7 @@ function FleetPage({ devices, loading, onRefresh, token }: { devices: Device[]; 
           ) : (
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(340px, 1fr))", gap: 20 }}>
               {devices.map(d => (
-                <DeviceCard key={d.id} d={d} token={token} igAccounts={igAccountsMap[d.id] || []} sessions={sessions} onLaunched={loadExtra} />
+                <DeviceCard key={d.id} d={d} token={token} igAccounts={igAccountsMap[d.id] || []} sessions={sessions} activeRun={activeRuns[d.id]} onLaunched={loadExtra} />
               ))}
             </div>
           )}
