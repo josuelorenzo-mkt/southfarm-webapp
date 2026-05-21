@@ -407,6 +407,13 @@ function DeviceCard({ d, token, igAccounts, sessions, onLaunched }: { d: Device;
   const [duration, setDuration] = useState("2");
   const [sending, setSending] = useState(false);
   const [msg, setMsg] = useState("");
+  const [now, setNow] = useState(Date.now());
+
+  // Tick every second for timer
+  useEffect(() => {
+    const iv = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(iv);
+  }, []);
 
   useEffect(() => {
     if (igAccounts.length > 0 && !account) setAccount(igAccounts[0].username);
@@ -420,6 +427,22 @@ function DeviceCard({ d, token, igAccounts, sessions, onLaunched }: { d: Device;
 
   const last = sessions.filter(s => igAccounts.some(a => a.username === s.account)).sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())[0] || null;
   const isActive = last && last.status === "running";
+
+  // Timer calculation for active warmup
+  const timerInfo = (() => {
+    if (!isActive || !last) return null;
+    const started = new Date(last.timestamp).getTime();
+    const durMin = (last as any).duration_minutes || 2;
+    const totalMs = durMin * 60000;
+    const elapsedMs = now - started;
+    const remainingMs = Math.max(0, totalMs - elapsedMs);
+    const pct = Math.min(100, (elapsedMs / totalMs) * 100);
+    const remMin = Math.floor(remainingMs / 60000);
+    const remSec = Math.floor((remainingMs % 60000) / 1000);
+    const elMin = Math.floor(elapsedMs / 60000);
+    const elSec = Math.floor((elapsedMs % 60000) / 1000);
+    return { pct, elapsed: elMin > 0 ? `${elMin}m ${elSec}s` : `${elSec}s`, remaining: remMin > 0 ? `${remMin}m ${remSec}s` : `${remSec}s`, durMin };
+  })();
 
   const launch = async () => {
     if (!account) return;
@@ -461,21 +484,34 @@ function DeviceCard({ d, token, igAccounts, sessions, onLaunched }: { d: Device;
           </span>
         </div>
 
-        {/* Activity badge */}
-        <div className="flex items-center gap-2" style={{ marginBottom: 14 }}>
-          {isActive ? (
-            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg" style={{ fontSize: 14, fontWeight: 600, background: "rgba(249,115,22,0.15)", color: "#f97316", border: "1px solid rgba(249,115,22,0.3)", animation: "activityPulse 2s ease-in-out infinite" }}>
-              <span style={{ width: 6, height: 6, borderRadius: "50%", background: "currentColor", animation: "dotPulse 1.5s ease-in-out infinite" }} /> Warmup en curso
-            </div>
+        {/* Activity badge + progress bar */}
+        <div style={{ marginBottom: 14 }}>
+          <div className="flex items-center gap-2" style={{ marginBottom: isActive && timerInfo ? 8 : 0 }}>
+            {isActive ? (
+              <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg" style={{ fontSize: 14, fontWeight: 600, background: "rgba(249,115,22,0.15)", color: "#f97316", border: "1px solid rgba(249,115,22,0.3)", animation: "activityPulse 2s ease-in-out infinite" }}>
+                <span style={{ width: 6, height: 6, borderRadius: "50%", background: "currentColor", animation: "dotPulse 1.5s ease-in-out infinite" }} /> Warmup en curso
+              </div>
           ) : last ? (
             <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg" style={{ fontSize: 13, fontWeight: 600, background: "rgba(34,197,94,0.1)", color: "var(--success)", border: "1px solid rgba(34,197,94,0.2)" }}>
               <span className="pulse-dot" style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--success)" }} /> Listo
             </div>
           ) : (
             <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg" style={{ fontSize: 13, fontWeight: 600, background: "rgba(255,255,255,0.05)", color: "var(--text-muted)", border: "1px solid var(--border-subtle)" }}>Sin actividad</div>
+            )}
+          </div>
+          {/* Progress bar for active warmup */}
+          {isActive && timerInfo && (
+            <div>
+              <div style={{ width: "100%", height: 4, background: "rgba(255,255,255,0.08)", borderRadius: 2, overflow: "hidden" }}>
+                <div style={{ width: `${timerInfo.pct}%`, height: "100%", borderRadius: 2, background: "#f97316", transition: "width 1s linear" }} />
+              </div>
+              <div className="flex justify-between" style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>
+                <span>{timerInfo.elapsed} transcurrido</span>
+                <span>{timerInfo.remaining} restante ({timerInfo.durMin}min)</span>
+              </div>
+            </div>
           )}
         </div>
-
         {/* Stats 2x2 */}
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 16 }}>
           <div style={{ background: "var(--bg-base)", padding: 14, borderRadius: "var(--radius-md)", border: "1px solid var(--border-subtle)" }}>
