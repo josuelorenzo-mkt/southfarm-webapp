@@ -629,7 +629,7 @@ function FleetPage({ devices, loading, onRefresh, token }: { devices: Device[]; 
             <h3 style={{ fontSize: 18, fontWeight: 600, marginBottom: 8 }}>Add New Device</h3>
             <p style={{ fontSize: 13, color: "var(--text-muted)", marginBottom: 20 }}>Scan with your Android phone to download SouthFarm</p>
             <img src="/qr-download.png" alt="QR Code" width={200} height={200} style={{ margin: "0 auto 16px", borderRadius: 12, display: "block" }} />
-            <p style={{ fontSize: 11, color: "var(--text-muted)" }}>Or visit: <span style={{ color: "var(--accent)" }}>southfarm.tech/download</span></p>
+            <p style={{ fontSize: 11, color: "var(--text-muted)" }}>Or visit: <span style={{ color: "var(--accent)" }}>southfarm.tech/southfarm.apk</span></p>
             <button onClick={() => setShowQR(false)} style={{ marginTop: 16, padding: "8px 20px", borderRadius: "var(--radius-md)", border: "1px solid var(--border-subtle)", background: "var(--bg-elevated)", color: "var(--text-secondary)", cursor: "pointer", fontSize: 13 }}>Close</button>
           </div>
         </div>
