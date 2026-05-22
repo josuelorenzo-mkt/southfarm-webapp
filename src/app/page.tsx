@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 
-const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
+const API = process.env.NEXT_PUBLIC_API_URL || "https://api.southfarm.tech";
 
 async function apiPost(path: string, body: Record<string, unknown>) {
   const res = await fetch(`${API}${path}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
