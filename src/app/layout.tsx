@@ -10,14 +10,14 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "SouthFarm — Control Center",
-  description: "Automatizacion movil para Instagram",
+  title: "SouthFarm — Command Center",
+  description: "Centro de comando para warmups, scans y dispositivos móviles de tu agencia.",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="es" className={inter.variable}>
-      <body className="antialiased">{children}</body>
+    <html lang="es" className={inter.variable} suppressHydrationWarning>
+      <body className="antialiased" suppressHydrationWarning>{children}</body>
     </html>
   );
 }

@@ -1,841 +1,724 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useCallback, useEffect, useState } from "react";
+import type { ReactNode } from "react";
+import QRCode from "qrcode";
+import { SchedulerPanel } from "./scheduler-panel";
 
-const API = process.env.NEXT_PUBLIC_API_URL || "https://api.southfarm.tech";
+const API = (process.env.NEXT_PUBLIC_API_URL || "https://api.southfarm.tech").replace(/\/$/, "");
 
-async function apiPost(path: string, body: Record<string, unknown>) {
-  const res = await fetch(`${API}${path}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || "Error");
-  return data;
-}
+type Role = "owner" | "admin" | "operator" | "viewer";
+type Platform = "instagram" | "tiktok" | "youtube";
+type Page = "overview" | "fleet" | "accounts" | "history" | "team" | "settings";
+type TaskMode = "warmup" | "scan";
 
-async function apiGet(path: string, token: string) {
-  const res = await fetch(`${API}${path}`, { headers: { Authorization: `Bearer ${token}` } });
-  return res.json();
-}
-
-interface Session {
+interface User {
   id: number;
+  email: string;
+  name: string;
+  role: Role;
+  created_at?: string;
+  workspace: { id: number; name: string; owner_user_id: number };
+}
+
+interface Device {
+  id: number;
+  user_id?: number;
+  device_id: string;
+  device_name: string | null;
+  alias?: string | null;
+  display_name?: string | null;
+  android_version: string | null;
+  app_version: string | null;
+  last_seen_at: string | null;
+  created_at: string;
+  online: boolean;
+  workspace_id?: number | null;
+  installation_id?: string | null;
+  lifecycle_status?: "active" | "revoked" | string;
+  device_status?: string;
+  connection_status?: "online" | "offline" | "never_seen" | string;
+  current_task?: {
+    id: number;
+    task_type: string;
+    status: string;
+    params?: Record<string, unknown>;
+  } | null;
+}
+
+interface DevicePairing {
+  id: number;
+  code: string;
+  access_key: string;
+  qr_payload: string;
+  expires_at: string;
+}
+
+interface SocialAccount {
+  id: number;
+  device_id: number;
+  device_key?: string;
+  platform: Platform;
+  username: string;
+  profile_pic_url?: string;
+  display_name?: string;
+  source_account_name?: string;
+  source_account_email?: string;
+  byline?: string;
+}
+
+interface TaskRun {
+  id: number;
+  user_id?: number;
+  device_id: number;
+  task_type: string;
+  status: string;
+  params: Record<string, unknown>;
+  result?: Record<string, unknown>;
+  created_at: string;
+  started_at?: string;
+  completed_at?: string;
+  updated_at?: string;
+}
+
+interface WarmupSession {
+  id: number;
+  task_run_id?: number | null;
+  device_id?: number | null;
+  device_name?: string | null;
   account: string;
+  platform: Platform;
+  duration_minutes: number;
   reels_viewed: number;
+  videos_viewed: number;
+  shorts_viewed: number;
   likes: number;
   saves: number;
   elapsed_sec: number;
   status: string;
   timestamp: string;
-  duration_minutes?: number;
+  metadata?: Record<string, unknown>;
 }
 
-interface Device { id: number; device_id: string; device_name: string | null; android_version: string | null; created_at: string; }
-interface IGAccount { id: number; username: string; device_id: number; }
-type Page = "dashboard" | "fleet" | "history" | "settings";
+interface ScanSession {
+  id: number;
+  task_run_id?: number | null;
+  device_id?: number | null;
+  device_name?: string | null;
+  platform: Platform;
+  status: string;
+  accounts_found: number;
+  started_at?: string;
+  completed_at?: string;
+  created_at: string;
+  metadata?: Record<string, unknown>;
+}
 
-// ─── SVG Icons ──────────────────────────────────────────
-const IconDashboard = () => (
-  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /><rect x="14" y="14" width="7" height="7" rx="1" /></svg>
-);
-const IconPhone = () => (
-  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect x="5" y="2" width="14" height="20" rx="2" /><line x1="12" y1="18" x2="12" y2="18.01" /></svg>
-);
-const IconActivity = () => (
-  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12" /></svg>
-);
-const IconGear = () => (
-  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09a1.65 1.65 0 00-1.08-1.51 1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09a1.65 1.65 0 001.51-1.08 1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001.08 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9c.26.604.852.997 1.51 1H21a2 2 0 010 4h-.09c-.658.003-1.25.396-1.51 1z" /></svg>
-);
-const IconCheck = () => (
-  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
-);
-const IconStop = () => (
-  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><rect x="4" y="4" width="16" height="16" rx="2" /></svg>
-);
-const IconRefresh = () => (
-  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="23 4 23 10 17 10" /><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10" /></svg>
-);
-const IconClock = () => (
-  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></svg>
-);
-const IconSend = () => (
-  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13" /><polygon points="22 2 15 22 11 13 2 9 22 2" /></svg>
-);
-const IconZap = () => (
-  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" /></svg>
-);
-const IconUpload = () => (
-  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" /><polyline points="17 8 12 3 7 8" /><line x1="12" y1="3" x2="12" y2="15" /></svg>
-);
-const IconHourglass = () => (
-  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M5 3h14M5 21h14M7 3v1.5a8 8 0 004 6.93A8 8 0 007 18.36V21M17 3v1.5a8 8 0 01-4 6.93A8 8 0 0117 18.36V21" /></svg>
-);
-const IconCheckCircle = () => (
-  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 11-5.93-9.14" /><polyline points="22 4 12 14.01 9 11.01" /></svg>
-);
-const IconPalette = () => (
-  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="13.5" cy="6.5" r="0.5" fill="currentColor" /><circle cx="17.5" cy="10.5" r="0.5" fill="currentColor" /><circle cx="8.5" cy="7.5" r="0.5" fill="currentColor" /><circle cx="6.5" cy="12" r="0.5" fill="currentColor" /><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 011.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z" /></svg>
-);
-const IconFlame = () => (
-  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M8.5 14.5A2.5 2.5 0 0011 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 11-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 002.5 2.5z" /></svg>
-);
-const IconSprout = () => (
-  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#000" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M7 20h10" /><path d="M10 20c5.5-2.5.8-6.4 3-10" /><path d="M9.5 9.4c1.1.8 1.8 2.2 2.3 3.7-2 .4-3.5.4-4.8-.3-1.2-.6-2.3-1.9-3-4.2 2.8-.5 4.4 0 5.5.8z" /><path d="M14.1 6a7 7 0 00-1.1 4c1.9-.1 3.3-.6 4.3-1.4 1-1 1.6-2.3 1.7-4.6-2.7.1-4 1-4.9 2z" /></svg>
-);
+interface Stats {
+  totals: {
+    total_sessions: number;
+    completed_sessions: number;
+    reels_viewed: number;
+    videos_viewed: number;
+    shorts_viewed: number;
+    likes: number;
+    saves: number;
+    elapsed_sec: number;
+  };
+  by_platform: Array<Record<string, number | string>>;
+  scans: Array<Record<string, number | string>>;
+}
 
-const NAV_SECTIONS = [
-  { title: "Overview", items: [
-    { id: "dashboard" as Page, label: "Dashboard", Icon: IconDashboard },
-  ]},
-  { title: "Operations", items: [
-    { id: "fleet" as Page, label: "Fleet", Icon: IconPhone },
-    { id: "history" as Page, label: "History", Icon: IconClock },
-  ]},
-  { title: "System", items: [
-    { id: "settings" as Page, label: "Settings", Icon: IconGear },
-  ]},
+interface TeamMember {
+  id: number;
+  email: string;
+  name: string;
+  role: Role;
+  status: string;
+  joined_at?: string;
+}
+
+interface Invite {
+  id: number;
+  email: string | null;
+  role: Role;
+  expires_at: string;
+  token?: string;
+  accepted_at?: string | null;
+}
+
+const PLATFORMS: Array<{ id: Platform; label: string; short: string; color: string }> = [
+  { id: "instagram", label: "Instagram", short: "IG", color: "#f472b6" },
+  { id: "tiktok", label: "TikTok", short: "TT", color: "#67e8f9" },
+  { id: "youtube", label: "YouTube Shorts", short: "YT", color: "#fb7185" },
 ];
 
-const NAV_FLAT: { id: Page; label: string; Icon: () => React.ReactNode }[] = NAV_SECTIONS.flatMap(s => s.items);
+const PAGES: Array<{ id: Page; label: string; glyph: string }> = [
+  { id: "overview", label: "Command center", glyph: "⌂" },
+  { id: "fleet", label: "Device fleet", glyph: "▣" },
+  { id: "accounts", label: "Warmup planner", glyph: "◎" },
+  { id: "history", label: "Activity history", glyph: "◷" },
+  { id: "team", label: "Team & roles", glyph: "♙" },
+  { id: "settings", label: "Settings", glyph: "⚙" },
+];
 
-function fmtDate(iso: string) {
-  try {
-    const d = new Date(iso), now = new Date(), diff = Math.floor((now.getTime() - d.getTime()) / 60000);
-    if (diff < 1) return "Ahora";
-    if (diff < 60) return `hace ${diff}m`;
-    if (diff < 1440) return `hace ${Math.floor(diff / 60)}h`;
-    if (diff < 2880) return "ayer";
-    return `${d.getDate()}/${d.getMonth() + 1} ${d.getHours()}:${String(d.getMinutes()).padStart(2, "0")}`;
-  } catch { return ""; }
+class ApiError extends Error {
+  status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.status = status;
+  }
 }
 
-function fmtToday() {
-  return new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
+async function request<T>(path: string, token?: string, init: RequestInit = {}): Promise<T> {
+  const headers = new Headers(init.headers);
+  if (init.body && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+  const response = await fetch(`${API}${path}`, { ...init, headers });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new ApiError(data.error || "No se pudo completar la solicitud", response.status);
+  return data as T;
 }
 
-// ─── Auth ──────────────────────────────────────────────
-function AuthPage({ onAuth }: { onAuth: (t: string, n: string) => void }) {
-  const [isLogin, setIsLogin] = useState(true);
+function parseObject(value: unknown): Record<string, unknown> {
+  if (value && typeof value === "object") return value as Record<string, unknown>;
+  if (typeof value === "string" && value.trim()) {
+    try {
+      const parsed = JSON.parse(value);
+      return parsed && typeof parsed === "object" ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+  return {};
+}
+
+function numberValue(value: unknown): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function platformInfo(value: unknown) {
+  return PLATFORMS.find((platform) => platform.id === value) || PLATFORMS[0];
+}
+
+function taskPlatform(task: TaskRun): Platform {
+  const paramPlatform = task.params?.platform;
+  if (paramPlatform === "tiktok" || paramPlatform === "youtube" || paramPlatform === "instagram") return paramPlatform;
+  if (task.task_type.includes("tiktok")) return "tiktok";
+  if (task.task_type.includes("youtube")) return "youtube";
+  return "instagram";
+}
+
+function relativeDate(value?: string | null): string {
+  if (!value) return "sin señal";
+  const timestamp = new Date(value).getTime();
+  if (!Number.isFinite(timestamp)) return "sin fecha";
+  const minutes = Math.max(0, Math.floor((Date.now() - timestamp) / 60000));
+  if (minutes < 1) return "ahora";
+  if (minutes < 60) return `hace ${minutes}m`;
+  if (minutes < 1440) return `hace ${Math.floor(minutes / 60)}h`;
+  return new Date(value).toLocaleDateString("es-AR", { day: "2-digit", month: "short" });
+}
+
+function fullDate(value?: string | null): string {
+  if (!value) return "—";
+  const parsed = new Date(value);
+  return Number.isFinite(parsed.getTime())
+    ? parsed.toLocaleString("es-AR", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })
+    : "—";
+}
+
+function statusText(status: string): string {
+  const labels: Record<string, string> = {
+    pending: "En cola",
+    running: "En ejecución",
+    paused: "Pausado",
+    completed: "Completado",
+    cancelled: "Cancelado",
+    error: "Error",
+    stopped: "Detenido",
+    online: "Online",
+    offline: "Offline",
+    never_seen: "Nunca conectado",
+    revoked: "Revocado",
+  };
+  return labels[status] || status;
+}
+
+function statusClass(status: string): string {
+  if (status === "running" || status === "online") return "status-live";
+  if (status === "completed") return "status-good";
+  if (status === "pending" || status === "paused") return "status-warn";
+  if (status === "error") return "status-bad";
+  return "status-neutral";
+}
+
+function warmupTaskType(platform: Platform): string {
+  return platform === "instagram" ? "warmup_ig" : `warmup_${platform}`;
+}
+
+function scanTaskType(platform: Platform): string {
+  return `scan_${platform}`;
+}
+
+function Glyph({ children }: { children: ReactNode }) {
+  return <span className="cc-glyph" aria-hidden="true">{children}</span>;
+}
+
+function StatusBadge({ status }: { status: string }) {
+  return <span className={`cc-status ${statusClass(status)}`}><span className="cc-status-dot" />{statusText(status)}</span>;
+}
+
+function PlatformBadge({ platform }: { platform: Platform }) {
+  const item = platformInfo(platform);
+  return <span className="cc-platform" style={{ color: item.color, borderColor: `${item.color}44`, background: `${item.color}12` }}>{item.short} · {item.label}</span>;
+}
+
+function AuthPage({ onAuth }: { onAuth: (token: string, user: User) => void }) {
+  const [login, setLogin] = useState(true);
+  const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [name, setName] = useState("");
+  const [inviteToken, setInviteToken] = useState("");
   const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [busy, setBusy] = useState(false);
 
   const submit = async () => {
-    setError(""); setLoading(true);
+    setError("");
+    setBusy(true);
     try {
-      const data = isLogin ? await apiPost("/api/auth/login", { email, password }) : await apiPost("/api/auth/register", { email, password, name });
-      localStorage.setItem("token", data.token); localStorage.setItem("userName", data.user.name);
-      onAuth(data.token, data.user.name);
-    } catch (e: unknown) { setError(e instanceof Error ? e.message : "Error"); } finally { setLoading(false); }
+      const payload = login
+        ? { email, password }
+        : { email, password, name, ...(inviteToken.trim() ? { invite_token: inviteToken.trim() } : {}) };
+      const result = await request<{ token: string; user: User }>(login ? "/api/auth/login" : "/api/auth/register", undefined, {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+      onAuth(result.token, result.user);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "No se pudo iniciar sesión");
+    } finally {
+      setBusy(false);
+    }
   };
 
-  const inputStyle = { background: "var(--bg-elevated)", border: "1px solid var(--border-subtle)", color: "var(--text-primary)" };
-
   return (
-    <div className="min-h-screen flex items-center justify-center p-4" style={{ background: "var(--bg-base)" }}>
-      <div className="w-full max-w-sm">
-        <div className="text-center mb-8">
-          <div className="w-14 h-14 rounded-[var(--radius-md)] flex items-center justify-center mx-auto mb-4" style={{ background: "linear-gradient(135deg, var(--accent) 0%, #15803d 100%)", boxShadow: "var(--shadow-md), var(--shadow-glow)" }}>
-            <IconSprout />
-          </div>
-          <h1 style={{ fontSize: 18, fontWeight: 700 }}><span style={{ color: "var(--accent)" }}>South</span>Farm</h1>
-          <p style={{ fontSize: 11, color: "var(--text-muted)", fontWeight: 500 }}>Control Center</p>
+    <main className="cc-auth-shell">
+      <div className="cc-auth-glow cc-auth-glow-one" />
+      <div className="cc-auth-glow cc-auth-glow-two" />
+      <section className="cc-auth-card">
+        <div className="cc-brand-lockup cc-brand-centered">
+          <div className="cc-brand-mark">SF</div>
+          <div><strong>SouthFarm</strong><small>command center</small></div>
         </div>
-        <div className="rounded-[var(--radius-lg)]" style={{ background: "var(--bg-surface)", border: "1px solid var(--border-subtle)" }}>
-          <div className="p-5 pb-0">
-            <div className="flex rounded-[var(--radius-md)] p-1 mb-5" style={{ background: "var(--bg-elevated)" }}>
-              <button onClick={() => setIsLogin(true)} className="flex-1 py-2 rounded-[var(--radius-sm)] text-sm font-semibold transition-all" style={isLogin ? { background: "var(--accent)", color: "#000" } : { color: "var(--text-secondary)" }}>Login</button>
-              <button onClick={() => setIsLogin(false)} className="flex-1 py-2 rounded-[var(--radius-sm)] text-sm font-semibold transition-all" style={!isLogin ? { background: "var(--accent)", color: "#000" } : { color: "var(--text-secondary)" }}>Register</button>
-            </div>
-          </div>
-          <div className="p-5 pt-0 space-y-3">
-            {!isLogin && <input type="text" placeholder="Nombre" value={name} onChange={(e) => setName(e.target.value)} className="w-full rounded-[var(--radius-md)] px-4 py-3 text-sm placeholder-zinc-600" style={inputStyle} />}
-            <input type="email" placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} className="w-full rounded-[var(--radius-md)] px-4 py-3 text-sm placeholder-zinc-600" style={inputStyle} />
-            <input type="password" placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submit()} className="w-full rounded-[var(--radius-md)] px-4 py-3 text-sm placeholder-zinc-600" style={inputStyle} />
-          </div>
-          {error && <p className="text-sm px-5" style={{ color: "var(--error)" }}>{error}</p>}
-          <div className="p-5 pt-2">
-            <button onClick={submit} disabled={loading} className="w-full font-bold py-3 rounded-[var(--radius-md)] text-sm transition-all hover:brightness-110 disabled:opacity-50" style={{ background: "linear-gradient(135deg, var(--accent) 0%, var(--accent-hover) 100%)", color: "#000", border: "1px solid var(--accent)" }}>
-              {loading ? "..." : isLogin ? "Login" : "Crear Cuenta"}
-            </button>
-          </div>
+        <div className="cc-auth-heading">
+          <p className="cc-eyebrow">AGENCY OPERATIONS</p>
+          <h1>{login ? "Tomá el control de tu flota." : "Sumate al workspace."}</h1>
+          <p>{login ? "Monitoreá celulares, cuentas y actividad desde un solo lugar." : "Creá tu acceso o usá el código de invitación de tu equipo."}</p>
         </div>
-      </div>
-    </div>
+        <div className="cc-segmented">
+          <button className={login ? "is-selected" : ""} onClick={() => { setLogin(true); setError(""); }}>Ingresar</button>
+          <button className={!login ? "is-selected" : ""} onClick={() => { setLogin(false); setError(""); }}>Crear cuenta</button>
+        </div>
+        <div className="cc-form-stack">
+          {!login && <label>Nombre<input value={name} onChange={(event) => setName(event.target.value)} placeholder="Tu nombre" /></label>}
+          <label>Email<input type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="vos@agencia.com" /></label>
+          <label>Contraseña<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void submit(); }} placeholder="Mínimo 8 caracteres" /></label>
+          {!login && <label>Código de invitación <span className="cc-label-hint">opcional</span><input value={inviteToken} onChange={(event) => setInviteToken(event.target.value)} placeholder="Pegá el código del owner" /></label>}
+        </div>
+        {error && <div className="cc-alert cc-alert-error">{error}</div>}
+        <button className="cc-button cc-button-primary cc-button-wide" onClick={() => void submit()} disabled={busy}>{busy ? "Conectando…" : login ? "Entrar al centro" : "Crear acceso"}<span>→</span></button>
+        <p className="cc-auth-footnote">La actividad se registra por dispositivo y workspace.</p>
+      </section>
+    </main>
   );
 }
 
-// ─── Sidebar (full, with sections) ─────────────────────
-function Sidebar({ current, onNav, deviceCount }: { current: Page; onNav: (p: Page) => void; deviceCount: number }) {
+function Sidebar({ page, user, onNavigate, onLogout }: { page: Page; user: User; onNavigate: (next: Page) => void; onLogout: () => void }) {
   return (
-    <aside className="hidden lg:flex flex-col flex-shrink-0 h-screen" style={{ width: "var(--sidebar-width)", background: "var(--bg-surface)", borderRight: "1px solid var(--border-subtle)", zIndex: 100 }}>
-      {/* Header */}
-      <div style={{ padding: 20, borderBottom: "1px solid var(--border-subtle)" }}>
-        <div className="flex items-center gap-3">
-          <div className="flex items-center justify-center flex-shrink-0" style={{ width: 42, height: 42, background: "linear-gradient(135deg, var(--accent) 0%, #15803d 100%)", borderRadius: "var(--radius-md)", boxShadow: "var(--shadow-md), var(--shadow-glow)" }}>
-            <IconSprout />
-          </div>
-          <div>
-            <h1 style={{ fontSize: 18, fontWeight: 700, letterSpacing: -0.5, lineHeight: 1.2 }}><span style={{ color: "var(--accent)" }}>South</span>Farm</h1>
-            <small style={{ fontSize: 11, color: "var(--text-muted)", fontWeight: 500 }}>Control Center</small>
-          </div>
-        </div>
+    <aside className="cc-sidebar">
+      <div className="cc-sidebar-top">
+        <div className="cc-brand-lockup"><div className="cc-brand-mark">SF</div><div><strong>SouthFarm</strong><small>command center</small></div></div>
+        <div className="cc-workspace-chip"><span className="cc-online-dot" />{user.workspace.name}</div>
       </div>
-
-      {/* Nav */}
-      <nav className="flex-1 overflow-y-auto" style={{ padding: "16px 12px" }}>
-        {NAV_SECTIONS.map((section) => (
-          <div key={section.title} style={{ marginBottom: 24 }}>
-            <div style={{ fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: 0.8, color: "var(--text-dim)", padding: "0 12px", marginBottom: 8 }}>{section.title}</div>
-            {section.items.map((item) => (
-              <button
-                key={item.id}
-                onClick={() => onNav(item.id)}
-                className="flex items-center gap-3 w-full relative mb-1"
-                style={{
-                  padding: "11px 14px",
-                  borderRadius: "var(--radius-md)",
-                  fontWeight: 500,
-                  transition: "all 0.15s ease",
-                  background: current === item.id ? "var(--accent-dim)" : "transparent",
-                  color: current === item.id ? "var(--accent)" : "var(--text-secondary)",
-                  border: "none",
-                  cursor: "pointer",
-                  textAlign: "left",
-                }}
-              >
-                {current === item.id && <span style={{ position: "absolute", left: 0, top: "50%", transform: "translateY(-50%)", width: 3, height: 20, background: "var(--accent)", borderRadius: "0 3px 3px 0" }} />}
-                <span className="flex-shrink-0"><item.Icon /></span>
-                <span className="flex-1">{item.label}</span>
-                {item.id === "fleet" && deviceCount > 0 && (
-                  <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 10, background: "var(--accent)", color: "#000" }}>{deviceCount}</span>
-                )}
-              </button>
-            ))}
-          </div>
+      <nav className="cc-side-nav">
+        <p className="cc-nav-caption">WORKSPACE</p>
+        {PAGES.map((item) => (
+          <button key={item.id} className={`cc-nav-item ${page === item.id ? "is-active" : ""}`} onClick={() => onNavigate(item.id)}><Glyph>{item.glyph}</Glyph><span>{item.label}</span>{item.id === "team" && (user.role === "owner" || user.role === "admin") && <b>RBAC</b>}</button>
         ))}
       </nav>
-
-      {/* Footer */}
-      <div style={{ padding: "16px 20px", borderTop: "1px solid var(--border-subtle)" }}>
-        <div className="flex items-center gap-2.5" style={{ padding: "10px 14px", background: "var(--bg-elevated)", borderRadius: "var(--radius-md)", fontSize: 12 }}>
-          <span className="pulse-dot" style={{ width: 8, height: 8, borderRadius: "50%", background: "var(--success)", boxShadow: "0 0 8px var(--success)", flexShrink: 0 }} />
-          <span style={{ color: "var(--text-secondary)" }}>Connected</span>
-        </div>
+      <div className="cc-sidebar-bottom">
+        <div className="cc-user-chip"><div className="cc-avatar">{user.name.charAt(0).toUpperCase()}</div><div className="cc-user-copy"><strong>{user.name}</strong><span>{user.role}</span></div><button className="cc-icon-button" title="Cerrar sesión" onClick={onLogout}>↪</button></div>
+        <div className="cc-api-health"><span className="cc-online-dot" /> API conectada <span>·</span> {API.replace("https://", "")}</div>
       </div>
     </aside>
   );
 }
 
-function MobileNav({ current, onNav }: { current: Page; onNav: (p: Page) => void }) {
-  return (
-    <nav className="lg:hidden fixed bottom-0 left-0 right-0 z-50 flex" style={{ background: "var(--bg-surface)", borderTop: "1px solid var(--border-subtle)" }}>
-      {NAV_FLAT.map((item) => (
-        <button key={item.id} onClick={() => onNav(item.id)} className="flex-1 flex flex-col items-center py-2.5 text-xs transition gap-0.5" style={current === item.id ? { color: "var(--accent)" } : { color: "var(--text-muted)" }}>
-          <item.Icon /><span>{item.label}</span>
-        </button>
-      ))}
-    </nav>
-  );
+function MobileNav({ page, onNavigate }: { page: Page; onNavigate: (next: Page) => void }) {
+  const items = PAGES.slice(0, 5);
+  return <nav className="cc-mobile-nav">{items.map((item) => <button key={item.id} className={page === item.id ? "is-active" : ""} onClick={() => onNavigate(item.id)}><Glyph>{item.glyph}</Glyph><span>{item.label.split(" ")[0]}</span></button>)}</nav>;
 }
 
-// ─── Top Bar ───────────────────────────────────────────
-function TopBar({ title, onSync, loading }: { title: string; onSync: () => void; loading: boolean }) {
-  return (
-    <header className="hidden lg:flex items-center justify-between flex-shrink-0" style={{ height: 64, background: "var(--glass-bg)", backdropFilter: "blur(12px)", borderBottom: "1px solid var(--border-subtle)", padding: "0 28px" }}>
-      <h1 style={{ fontSize: 20, fontWeight: 700, letterSpacing: -0.3 }}>{title}</h1>
-      <div className="flex items-center gap-3">
-        <span style={{ fontSize: 12, color: "var(--text-muted)" }}>{fmtToday()}</span>
-        <button onClick={onSync} className="flex items-center gap-1.5 transition-all" style={{ padding: "7px 12px", fontSize: 12, fontWeight: 600, borderRadius: "var(--radius-md)", border: "1px solid var(--border-default)", background: "var(--bg-elevated)", color: "var(--text-primary)", cursor: "pointer" }} disabled={loading}>
-          <IconRefresh /> Sync
-        </button>
-      </div>
-    </header>
-  );
+function Topbar({ page, user, lastUpdated, busy, onRefresh }: { page: Page; user: User; lastUpdated: string; busy: boolean; onRefresh: () => void }) {
+  const title = PAGES.find((item) => item.id === page)?.label || "Command center";
+  return <header className="cc-topbar"><div><p className="cc-eyebrow">SOUTHFARM / {user.workspace.name.toUpperCase()}</p><h1>{title}</h1></div><div className="cc-topbar-actions"><span className="cc-last-sync">Actualizado {relativeDate(lastUpdated)}</span><button className="cc-button cc-button-ghost" onClick={onRefresh} disabled={busy}><Glyph>↻</Glyph>{busy ? "Sincronizando" : "Sync"}</button><div className="cc-topbar-avatar">{user.name.charAt(0).toUpperCase()}</div></div></header>;
 }
 
-// ─── Metric Card ───────────────────────────────────────
-function MetricCard({ icon, value, label, color }: { icon: React.ReactNode; value: number | string; label: string; color: string }) {
-  const bgMap: Record<string, string> = {
-    green: "var(--success-dim)", blue: "var(--info-dim)", yellow: "var(--warning-dim)", purple: "var(--purple-dim)",
-  };
-  return (
-    <div style={{ background: "linear-gradient(135deg, var(--bg-elevated) 0%, var(--bg-surface) 100%)", border: "1px solid var(--border-subtle)", borderRadius: "var(--radius-lg)", padding: 22, position: "relative", overflow: "hidden", transition: "all 0.2s ease" }}
-      className="hover:-translate-y-0.5"
-      onMouseEnter={e => { e.currentTarget.style.borderColor = "var(--border-default)"; e.currentTarget.style.boxShadow = "var(--shadow-md)"; }}
-      onMouseLeave={e => { e.currentTarget.style.borderColor = "var(--border-subtle)"; e.currentTarget.style.boxShadow = "none"; }}
-    >
-      <div style={{ position: "absolute", top: 0, right: 0, width: 100, height: 100, background: "radial-gradient(circle, var(--accent-dim) 0%, transparent 70%)", opacity: 0.5 }} />
-      <div className="flex items-center justify-center" style={{ width: 44, height: 44, borderRadius: "var(--radius-md)", background: bgMap[color] || bgMap.green, marginBottom: 14, color: "var(--accent)" }}>
-        {icon}
-      </div>
-      <div style={{ fontSize: 32, fontWeight: 800, letterSpacing: -1, lineHeight: 1, marginBottom: 6 }}>{value}</div>
-      <div style={{ fontSize: 13, color: "var(--text-secondary)", fontWeight: 500 }}>{label}</div>
+function MetricCard({ label, value, detail, glyph, tone }: { label: string; value: string | number; detail: string; glyph: string; tone: string }) {
+  return <article className={`cc-metric cc-tone-${tone}`}><div className="cc-metric-head"><span className="cc-metric-glyph">{glyph}</span><span>{label}</span></div><strong>{value}</strong><small>{detail}</small></article>;
+}
+
+function EmptyState({ title, detail }: { title: string; detail: string }) {
+  return <div className="cc-empty"><div className="cc-empty-mark">⌁</div><strong>{title}</strong><span>{detail}</span></div>;
+}
+
+function DashboardPage({ devices, accounts, runs, sessions, scans, stats, onNavigate }: { devices: Device[]; accounts: SocialAccount[]; runs: TaskRun[]; sessions: WarmupSession[]; scans: ScanSession[]; stats: Stats; onNavigate: (page: Page) => void }) {
+  const online = devices.filter((device) => device.online).length;
+  const activeRuns = runs.filter((run) => ["pending", "running", "paused"].includes(run.status));
+  const totals = stats.totals || { total_sessions: sessions.length, reels_viewed: 0, likes: 0, saves: 0, elapsed_sec: 0, completed_sessions: 0, videos_viewed: 0, shorts_viewed: 0 };
+  const platformRows = PLATFORMS.map((platform) => ({ platform, accounts: accounts.filter((account) => account.platform === platform.id).length, sessions: sessions.filter((session) => session.platform === platform.id).length }));
+
+  return <div className="cc-page-stack">
+    <section className="cc-hero"><div><p className="cc-eyebrow cc-eyebrow-accent">LIVE OPERATIONS</p><h2>Buen día. Esta es tu <em>señal de mando.</em></h2><p>Monitoreá la salud de la flota y mantené los warmups en movimiento.</p></div><div className="cc-hero-orbit"><span /><span /><span /><strong>{online}</strong><small>devices<br />online</small></div></section>
+    <div className="cc-kpi-grid"><MetricCard label="Dispositivos online" value={`${online}/${devices.length}`} detail={online === devices.length && devices.length ? "Flota operativa" : "Revisar conexión"} glyph="◉" tone="green" /><MetricCard label="Tareas activas" value={activeRuns.length} detail={activeRuns.length ? "Comandos en curso" : "Sin tareas pendientes"} glyph="↯" tone="blue" /><MetricCard label="Warmups registrados" value={totals.total_sessions} detail={`${totals.completed_sessions || 0} completados`} glyph="◌" tone="orange" /><MetricCard label="Cuentas detectadas" value={accounts.length} detail={`${scans.length} scans registrados`} glyph="◎" tone="purple" /></div>
+    <div className="cc-two-column">
+      <section className="cc-card cc-card-tall"><div className="cc-card-heading"><div><p className="cc-eyebrow">COMMAND QUEUE</p><h3>Actividad en vivo</h3></div><button className="cc-link-button" onClick={() => onNavigate("fleet")}>Ver flota →</button></div>{activeRuns.length ? <div className="cc-operation-list">{activeRuns.slice(0, 5).map((run) => <OperationRow key={run.id} run={run} device={devices.find((device) => device.id === run.device_id)} />)}</div> : <EmptyState title="No hay comandos activos" detail="Lanzá un warmup o scan desde la flota." />}</section>
+      <section className="cc-card cc-card-tall"><div className="cc-card-heading"><div><p className="cc-eyebrow">PLATFORM PULSE</p><h3>Distribución por red</h3></div><button className="cc-link-button" onClick={() => onNavigate("accounts")}>Cuentas →</button></div><div className="cc-platform-list">{platformRows.map(({ platform, accounts: accountCount, sessions: sessionCount }) => <div className="cc-platform-row" key={platform.id}><div className="cc-platform-row-title"><PlatformBadge platform={platform.id} /><span>{accountCount} cuentas</span></div><div className="cc-bar-track"><span style={{ width: `${Math.min(100, Math.max(8, accountCount * 16))}%`, background: platform.color }} /></div><small>{sessionCount} warmups</small></div>)}</div><div className="cc-mini-summary"><div><strong>{numberValue(totals.videos_viewed || totals.reels_viewed)}</strong><span>videos vistos</span></div><div><strong>{numberValue(totals.likes)}</strong><span>likes</span></div><div><strong>{numberValue(totals.saves)}</strong><span>saves</span></div></div></section>
     </div>
-  );
-}
-
-// ─── Glass Card ────────────────────────────────────────
-function GlassCard({ title, icon, actions, children, noPadding }: { title?: string; icon?: React.ReactNode; actions?: React.ReactNode; children: React.ReactNode; noPadding?: boolean }) {
-  return (
-    <div style={{ background: "var(--bg-surface)", border: "1px solid var(--border-subtle)", borderRadius: "var(--radius-lg)", boxShadow: "var(--shadow-sm)", overflow: "hidden", transition: "all 0.2s ease" }}
-      onMouseEnter={e => e.currentTarget.style.borderColor = "var(--border-default)"}
-      onMouseLeave={e => e.currentTarget.style.borderColor = "var(--border-subtle)"}
-    >
-      {title && (
-        <div className="flex items-center justify-between" style={{ padding: "18px 22px", borderBottom: "1px solid var(--border-subtle)", background: "linear-gradient(180deg, var(--bg-elevated) 0%, var(--bg-surface) 100%)" }}>
-          <div className="flex items-center gap-2.5" style={{ fontSize: 15, fontWeight: 600 }}>
-            {icon}{title}
-          </div>
-          {actions}
-        </div>
-      )}
-      <div style={noPadding ? {} : { padding: 22 }}>{children}</div>
+    <div className="cc-two-column">
+      <section className="cc-card"><div className="cc-card-heading"><div><p className="cc-eyebrow">RECENT WARMUPS</p><h3>Última actividad</h3></div><button className="cc-link-button" onClick={() => onNavigate("history")}>Historial →</button></div>{sessions.length ? <div className="cc-compact-list">{sessions.slice(0, 5).map((session) => <div className="cc-compact-row" key={session.id}><div className="cc-row-icon" style={{ color: platformInfo(session.platform).color }}>{platformInfo(session.platform).short}</div><div className="cc-row-copy"><strong>@{session.account || "sin cuenta"}</strong><span>{platformInfo(session.platform).label} · {relativeDate(session.timestamp)}</span></div><div className="cc-row-metric"><strong>{numberValue(session.videos_viewed || session.reels_viewed)}</strong><span>videos</span></div><StatusBadge status={session.status} /></div>)}</div> : <EmptyState title="Todavía no hay warmups" detail="El historial va a aparecer acá." />}</section>
+      <section className="cc-card"><div className="cc-card-heading"><div><p className="cc-eyebrow">SCAN LOG</p><h3>Últimos scans</h3></div><button className="cc-link-button" onClick={() => onNavigate("history")}>Ver todos →</button></div>{scans.length ? <div className="cc-compact-list">{scans.slice(0, 5).map((scan) => <div className="cc-compact-row" key={scan.id}><div className="cc-row-icon" style={{ color: platformInfo(scan.platform).color }}>⌕</div><div className="cc-row-copy"><strong>{platformInfo(scan.platform).label}</strong><span>{scan.device_name || "Dispositivo"} · {relativeDate(scan.completed_at || scan.created_at)}</span></div><div className="cc-row-metric"><strong>{numberValue(scan.accounts_found)}</strong><span>cuentas</span></div><StatusBadge status={scan.status} /></div>)}</div> : <EmptyState title="No hay scans registrados" detail="Los scans remotos aparecerán acá." />}</section>
     </div>
-  );
+  </div>;
 }
 
-// ─── Badge ─────────────────────────────────────────────
-function Badge({ children, color }: { children: React.ReactNode; color: string }) {
-  const map: Record<string, { bg: string; c: string }> = {
-    success: { bg: "var(--success-dim)", c: "var(--success)" },
-    info: { bg: "var(--info-dim)", c: "var(--info)" },
-    warning: { bg: "var(--warning-dim)", c: "var(--warning)" },
-    error: { bg: "var(--error-dim)", c: "var(--error)" },
-    purple: { bg: "var(--purple-dim)", c: "var(--purple)" },
-    orange: { bg: "var(--orange-dim)", c: "var(--orange)" },
-  };
-  const s = map[color] || map.success;
-  return <span className="inline-flex items-center gap-1.5" style={{ fontSize: 11, fontWeight: 600, padding: "5px 12px", borderRadius: 20, background: s.bg, color: s.c }}>{children}</span>;
+function OperationRow({ run, device }: { run: TaskRun; device?: Device }) {
+  const platform = taskPlatform(run);
+  const isScan = run.task_type.startsWith("scan_");
+  return <div className="cc-operation-row"><div className="cc-operation-icon" style={{ color: platformInfo(platform).color }}>{isScan ? "⌕" : "↯"}</div><div className="cc-row-copy"><strong>{isScan ? "Scan" : "Warmup"} · {platformInfo(platform).label}</strong><span>{device?.device_name || device?.device_id || "Dispositivo"} · #{run.id}</span></div><StatusBadge status={run.status} /></div>;
 }
 
-// ─── Dashboard Page ────────────────────────────────────
-function DashboardPage({ sessions, devices }: { sessions: Session[]; devices: Device[] }) {
-  const activeSessions = sessions.filter(s => s.status === "running" || s.status === "pending").length;
-  const completedSessions = sessions.filter(s => s.status === "completed").length;
-  const totalReels = sessions.reduce((s, r) => s + (r.reels_viewed || 0), 0);
-  const successRate = sessions.length > 0 ? Math.round((completedSessions / sessions.length) * 100) + "%" : "—";
-
-  return (
-    <div>
-      <div className="hidden lg:block" style={{ marginBottom: 28 }}>
-        <h2 style={{ fontSize: 26, fontWeight: 700, letterSpacing: -0.5, marginBottom: 6 }}>Overview</h2>
-        <p style={{ color: "var(--text-secondary)", fontSize: 14 }}>Your phone farm at a glance</p>
-      </div>
-      <div className="lg:hidden flex justify-between items-center mb-6">
-        <h1 className="text-xl font-bold">Dashboard</h1>
-      </div>
-
-      {/* Metrics */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-5 mb-7">
-        <MetricCard icon={<IconPhone />} value={devices.length} label="Devices Online" color="green" />
-        <MetricCard icon={<IconUpload />} value={totalReels} label="Reels Viewed" color="blue" />
-        <MetricCard icon={<IconHourglass />} value={activeSessions} label="Active Sessions" color="yellow" />
-        <MetricCard icon={<IconCheckCircle />} value={successRate} label="Success Rate" color="purple" />
-      </div>
-
-      {/* Two columns */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Quick Actions */}
-        <GlassCard title="Quick Actions" icon={<IconZap />}>
-          <div className="flex flex-col gap-3">
-            <button className="flex items-center justify-center gap-2 w-full font-bold py-2.5 rounded-[var(--radius-md)] text-sm transition-all hover:brightness-110" style={{ background: "linear-gradient(135deg, var(--accent) 0%, var(--accent-hover) 100%)", border: "1px solid var(--accent)", color: "#000" }}>
-              <IconFlame /> Start Warmup
-            </button>
-            <button className="flex items-center justify-center gap-2 w-full font-semibold py-2.5 rounded-[var(--radius-md)] text-sm transition-all" style={{ background: "var(--bg-elevated)", border: "1px solid var(--border-default)", color: "var(--text-primary)", cursor: "pointer" }}>
-              <IconSend /> View Fleet
-            </button>
-          </div>
-        </GlassCard>
-
-        {/* Recent Activity */}
-        <GlassCard title="Recent Activity" icon={<IconActivity />} actions={<button style={{ padding: "7px 12px", fontSize: 12, fontWeight: 600, borderRadius: "var(--radius-md)", border: "1px solid var(--border-default)", background: "var(--bg-elevated)", color: "var(--text-primary)", cursor: "pointer" }}><IconRefresh /></button>}>
-          {sessions.length === 0 ? (
-            <div className="flex flex-col items-center py-8" style={{ color: "var(--text-muted)" }}>
-              <IconActivity />
-              <p className="mt-2 text-sm">No recent activity</p>
-            </div>
-          ) : (
-            <div className="space-y-0">
-              {sessions.slice(0, 8).map((s) => {
-                const colors = ["var(--info)", "var(--pink)", "var(--warning)", "var(--accent)"];
-                const c = colors[s.id % colors.length];
-                return (
-                  <div key={s.id} className="flex items-center py-3 gap-3" style={{ borderBottom: "1px solid var(--border-subtle)" }}>
-                    <div className="flex items-center justify-center flex-shrink-0" style={{ width: 28, height: 28, borderRadius: "50%", background: c.startsWith("var(--info)") ? "var(--info-dim)" : c.startsWith("var(--pink)") ? "rgba(244,114,182,0.12)" : c.startsWith("var(--warning)") ? "var(--warning-dim)" : "var(--success-dim)", color: c, fontSize: 11, fontWeight: 700 }}>
-                      {(s.account || "?").charAt(0).toUpperCase()}
-                    </div>
-                    <div className="flex-1 text-[13px]">
-                      <strong style={{ color: "var(--accent)" }}>@{s.account || "?"}</strong> warmup — {s.reels_viewed || 0} reels, {s.likes || 0} likes
-                    </div>
-                    <div className="text-[11px] flex-shrink-0" style={{ color: "var(--text-muted)" }}>{fmtDate(s.timestamp)}</div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </GlassCard>
-
-        {/* Fleet Summary */}
-        <GlassCard title="Fleet Status" icon={<IconPhone />} actions={<Badge color="success">{devices.length} online</Badge>}>
-          {devices.length === 0 ? (
-            <div className="flex flex-col items-center py-8" style={{ color: "var(--text-muted)" }}>
-              <IconPhone />
-              <p className="mt-2 text-sm">No devices connected</p>
-            </div>
-          ) : (
-            <div className="space-y-2">
-              {devices.map((d) => (
-                <div key={d.id} className="flex items-center gap-3 p-2.5 rounded-[var(--radius-md)]" style={{ background: "var(--bg-elevated)" }}>
-                  <span className="pulse-dot flex-shrink-0" style={{ width: 8, height: 8, borderRadius: "50%", background: "var(--success)" }} />
-                  <span className="flex-1 text-sm font-medium truncate">{d.device_name || d.device_id.slice(0, 16)}</span>
-                  <span style={{ fontSize: 11, color: "var(--text-muted)" }}>Android {d.android_version || "?"}</span>
-                </div>
-              ))}
-            </div>
-          )}
-        </GlassCard>
-      </div>
-    </div>
-  );
-}
-
-// ─── Single Device Card (with inline warmup) ─────────────────
-function DeviceCard({ d, token, igAccounts, sessions, activeRun, onLaunched }: { d: Device; token: string; igAccounts: IGAccount[]; sessions: Session[]; activeRun?: any; onLaunched: () => void }) {
-  const [expanded, setExpanded] = useState(false);
+function TaskLauncher({ device, accounts, activeRun, token, onChanged, canRunTasks }: { device: Device; accounts: SocialAccount[]; activeRun?: TaskRun; token: string; onChanged: () => void; canRunTasks: boolean }) {
+  const [open, setOpen] = useState(false);
+  const [mode, setMode] = useState<TaskMode>("warmup");
+  const [platform, setPlatform] = useState<Platform>("instagram");
   const [account, setAccount] = useState("");
   const [duration, setDuration] = useState("2");
-  const [sending, setSending] = useState(false);
-  const [msg, setMsg] = useState("");
-  const [now, setNow] = useState(Date.now());
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState("");
+    const platformAccounts = accounts.filter((item) => item.device_id === device.id && item.platform === platform);
+  const selectedAccount = platformAccounts.find((item) => item.username === account)?.username || platformAccounts[0]?.username || "";
 
-  // Tick every second for timer
-  useEffect(() => {
-    const iv = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(iv);
-  }, []);
-
-  useEffect(() => {
-    if (igAccounts.length > 0 && !account) setAccount(igAccounts[0].username);
-  }, [igAccounts]);
-
-  const stats = (() => {
-    const accNames = igAccounts.map(a => a.username);
-    const ds = sessions.filter(s => accNames.includes(s.account));
-    return { total: ds.length, reels: ds.reduce((s, x) => s + (x.reels_viewed || 0), 0), likes: ds.reduce((s, x) => s + (x.likes || 0), 0), mins: Math.round(ds.reduce((s, x) => s + (x.elapsed_sec || 0), 0) / 60) };
-  })();
-
-  const last = sessions.filter(s => igAccounts.some(a => a.username === s.account)).sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())[0] || null;
-  const isActive = (() => {
-    if (!activeRun) return false;
-    const s = activeRun.status;
-    if (s !== 'pending' && s !== 'running' && s !== 'paused') return false;
-    if (!activeRun.created_at) return false;
-    return true;
-  })();
-
-  const isPaused = activeRun?.status === 'paused';
-
-  // Timer calculation from active task_run
-  const timerInfo = (() => {
-    if (!isActive || !activeRun || !activeRun.created_at) return null;
-    const started = new Date(activeRun.created_at).getTime();
-    const params = JSON.parse(activeRun.params || '{}');
-    const durMin = params.duration_minutes || 2;
-    const totalMs = durMin * 60000;
-    const elapsedMs = Math.max(0, now - started);
-    const pct = Math.min(100, Math.max(0, (elapsedMs / totalMs) * 100));
-    const elSec = Math.floor(elapsedMs / 1000);
-    return { pct, elapsed: elSec >= 60 ? `${Math.floor(elSec/60)}m ${elSec%60}s` : `${elSec}s`, durMin, runId: activeRun.id };
-  })();
+  const control = async (action: "pause" | "resume" | "stop") => {
+    if (!activeRun) return;
+    setBusy(true);
+    setMessage("");
+    try {
+      await request(`/api/tasks/runs/${activeRun.id}/${action}`, token, { method: "PATCH" });
+      onChanged();
+    } catch (cause) {
+      setMessage(cause instanceof Error ? cause.message : "No se pudo actualizar la tarea");
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const launch = async () => {
-    if (!account) return;
-    setSending(true); setMsg("");
+    if (mode === "warmup" && !selectedAccount.trim()) { setMessage("No hay una cuenta escaneada para esta plataforma en este dispositivo."); return; }
+    setBusy(true);
+    setMessage("");
     try {
-      const headers: Record<string, string> = { "Content-Type": "application/json", Authorization: `Bearer ${token}` };
-      const res = await fetch(`${API}/api/tasks/run`, { method: "POST", headers, body: JSON.stringify({ task_type: "warmup_ig", device_id: d.id, params: { account, duration_minutes: parseInt(duration) } }) });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Error");
-      setMsg(`Warmup encolado!`);
-      onLaunched();
-      setTimeout(() => { setExpanded(false); setMsg(""); }, 2000);
-    } catch (e) { setMsg(`Error: ${e instanceof Error ? e.message : "desconocido"}`); } finally { setSending(false); }
+      const taskType = mode === "warmup" ? warmupTaskType(platform) : scanTaskType(platform);
+      const params = mode === "warmup" ? { platform, account: selectedAccount.trim().replace(/^@+/, ""), duration_minutes: Number(duration) } : { platform };
+      await request("/api/tasks/run", token, { method: "POST", body: JSON.stringify({ device_id: device.id, task_type: taskType, params }) });
+      setOpen(false);
+      setMessage("Comando enviado");
+      onChanged();
+    } catch (cause) {
+      setMessage(cause instanceof Error ? cause.message : "No se pudo enviar el comando");
+    } finally {
+      setBusy(false);
+    }
   };
 
-  const taskAction = async (action: string) => {
-    if (!activeRun) return;
-    try {
-      const headers: Record<string, string> = { "Content-Type": "application/json", Authorization: `Bearer ${token}` };
-      await fetch(`${API}/api/tasks/runs/${activeRun.id}/${action}`, { method: "PATCH", headers });
-      onLaunched();
-    } catch (e) {}
-  };
-
-  return (
-    <div style={{ position: "relative", borderRadius: "var(--radius-lg)", padding: isActive ? 2 : 0, overflow: "hidden" }}>
-      {isActive && (
-        <div style={{ position: "absolute", top: "50%", left: "50%", width: "200%", height: "200%", transform: "translate(-50%, -50%)", background: "conic-gradient(from 0deg, transparent 0%, #22c55e 10%, #3b82f6 20%, #a855f7 30%, #22c55e 40%, transparent 50%)", animation: "borderSpin 3s linear infinite", zIndex: 0 }} />
-      )}
-      <div className="device-card-inner" style={{ background: "linear-gradient(145deg, var(--bg-elevated) 0%, var(--bg-surface) 100%)", border: isActive ? "none" : "1px solid var(--border-subtle)", borderRadius: "var(--radius-lg)", padding: 22, position: "relative", overflow: "hidden", zIndex: 1, transition: "all 0.25s ease", boxShadow: isActive ? "0 0 12px rgba(34,197,94,0.2)" : "none" }}
-        onMouseEnter={e => { if (!isActive) { e.currentTarget.style.borderColor = "var(--border-default)"; e.currentTarget.style.transform = "translateY(-3px)"; e.currentTarget.style.boxShadow = "var(--shadow-lg)"; } }}
-        onMouseLeave={e => { if (!isActive) { e.currentTarget.style.borderColor = "var(--border-subtle)"; e.currentTarget.style.transform = "none"; e.currentTarget.style.boxShadow = "none"; } }}
-      >
-        {/* Green glow */}
-        <div style={{ position: "absolute", top: "-50%", right: "-50%", width: "100%", height: "100%", background: "radial-gradient(circle, rgba(34,197,94,0.06) 0%, transparent 60%)", pointerEvents: "none" }} />
-
-        {/* Header */}
-        <div className="flex items-center justify-between" style={{ marginBottom: 18 }}>
-          <div className="flex items-center gap-3">
-            <div className="flex items-center justify-center" style={{ width: 48, height: 48, borderRadius: "var(--radius-md)", background: "var(--bg-active)" }}><IconPhone /></div>
-            <div>
-              <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 2 }}>{d.device_name || "Unknown Device"}</div>
-              <div style={{ fontSize: 12, color: "var(--text-muted)" }}>Android {d.android_version || "?"} · {d.device_id.slice(0, 12)}</div>
-            </div>
-          </div>
-          <span className="px-3 py-1.5 rounded-full font-bold uppercase tracking-wide" style={{ fontSize: 11, letterSpacing: 0.3, background: "var(--success-dim)", color: "var(--success)", boxShadow: "0 0 12px var(--success-dim)" }}>
-            <span className="pulse-dot inline-block mr-1" style={{ width: 6, height: 6, borderRadius: "50%", background: "currentColor" }} /> Online
-          </span>
-        </div>
-
-        {/* Activity badge + progress bar */}
-        <div style={{ marginBottom: 14 }}>
-          <div className="flex items-center gap-2" style={{ marginBottom: isActive && timerInfo ? 8 : 0 }}>
-            {isActive ? (
-              <div className="flex items-center gap-2 flex-wrap">
-                <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg" style={{ fontSize: 14, fontWeight: 600, background: isPaused ? "rgba(59,130,246,0.15)" : "rgba(249,115,22,0.15)", color: isPaused ? "#3b82f6" : "#f97316", border: `1px solid ${isPaused ? "rgba(59,130,246,0.3)" : "rgba(249,115,22,0.3)"}`, animation: isPaused ? "none" : "activityPulse 2s ease-in-out infinite" }}>
-                  <span style={{ width: 6, height: 6, borderRadius: "50%", background: "currentColor", animation: isPaused ? "none" : "dotPulse 1.5s ease-in-out infinite" }} />
-                  {isPaused ? "Pausado" : "Warmup en curso"}
-                </div>
-                <div className="flex items-center gap-1.5">
-                  {isPaused ? (
-                    <button onClick={() => taskAction("resume")} className="flex items-center justify-center" style={{ width: 30, height: 30, borderRadius: "var(--radius-md)", border: "1px solid rgba(34,197,94,0.4)", background: "rgba(34,197,94,0.1)", color: "var(--accent)", cursor: "pointer", fontSize: 14, lineHeight: 1 }} title="Reanudar">▶</button>
-                  ) : (
-                    <button onClick={() => taskAction("pause")} className="flex items-center justify-center" style={{ width: 30, height: 30, borderRadius: "var(--radius-md)", border: "1px solid rgba(249,115,22,0.4)", background: "rgba(249,115,22,0.1)", color: "#f97316", cursor: "pointer", fontSize: 14, lineHeight: 1 }} title="Pausar">⏸</button>
-                  )}
-                  <button onClick={() => taskAction("stop")} className="flex items-center justify-center" style={{ width: 30, height: 30, borderRadius: "var(--radius-md)", border: "1px solid rgba(239,68,68,0.4)", background: "rgba(239,68,68,0.1)", color: "var(--error)", cursor: "pointer", fontSize: 14, lineHeight: 1 }} title="Detener">⏹</button>
-                </div>
-              </div>
-          ) : last ? (
-            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg" style={{ fontSize: 13, fontWeight: 600, background: "rgba(34,197,94,0.1)", color: "var(--success)", border: "1px solid rgba(34,197,94,0.2)" }}>
-              <span className="pulse-dot" style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--success)" }} /> Listo
-            </div>
-          ) : (
-            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg" style={{ fontSize: 13, fontWeight: 600, background: "rgba(255,255,255,0.05)", color: "var(--text-muted)", border: "1px solid var(--border-subtle)" }}>Sin actividad</div>
-            )}
-          </div>
-          {/* Progress bar for active warmup */}
-          {isActive && timerInfo && (
-            <div>
-              <div style={{ width: "100%", height: 4, background: "rgba(255,255,255,0.08)", borderRadius: 2, overflow: "hidden" }}>
-                <div style={{ width: `${timerInfo.pct}%`, height: "100%", borderRadius: 2, background: "#f97316", transition: "width 1s linear" }} />
-              </div>
-              <div className="flex justify-between" style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>
-                <span>{timerInfo.elapsed}</span>
-                <span>{timerInfo.durMin}min</span>
-              </div>
-            </div>
-          )}
-        </div>
-        {/* Stats 2x2 */}
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 16 }}>
-          <div style={{ background: "var(--bg-base)", padding: 14, borderRadius: "var(--radius-md)", border: "1px solid var(--border-subtle)" }}>
-            <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.03rem", marginBottom: 6 }}>Sesiones</div>
-            <div style={{ fontSize: 18, fontWeight: 700, color: "var(--accent)" }}>{stats.total}</div>
-          </div>
-          <div style={{ background: "var(--bg-base)", padding: 14, borderRadius: "var(--radius-md)", border: "1px solid var(--border-subtle)" }}>
-            <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.03rem", marginBottom: 6 }}>Reels</div>
-            <div style={{ fontSize: 18, fontWeight: 700, color: "#60a5fa" }}>{stats.reels}</div>
-          </div>
-          <div style={{ background: "var(--bg-base)", padding: 14, borderRadius: "var(--radius-md)", border: "1px solid var(--border-subtle)" }}>
-            <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.03rem", marginBottom: 6 }}>Likes</div>
-            <div style={{ fontSize: 18, fontWeight: 700, color: "#f472b6" }}>{stats.likes}</div>
-          </div>
-          <div style={{ background: "var(--bg-base)", padding: 14, borderRadius: "var(--radius-md)", border: "1px solid var(--border-subtle)" }}>
-            <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.03rem", marginBottom: 6 }}>Minutos</div>
-            <div style={{ fontSize: 18, fontWeight: 700, color: "#fbbf24" }}>{stats.mins}</div>
-          </div>
-        </div>
-
-        {/* IG Accounts */}
-        {igAccounts.length > 0 && (
-          <div style={{ borderTop: "1px solid var(--border-subtle)", paddingTop: 14, marginBottom: 14 }}>
-            <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.05rem", marginBottom: 8 }}>Cuentas IG</div>
-            <div className="flex flex-wrap gap-1.5">
-              {igAccounts.map(a => (
-                <span key={a.id} className="px-2.5 py-1 rounded-md text-xs font-medium" style={{ background: "rgba(34,197,94,0.1)", color: "var(--accent)", border: "1px solid rgba(34,197,94,0.2)" }}>@{a.username}</span>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Launch Warmup button */}
-        <button onClick={() => setExpanded(!expanded)} className="w-full flex items-center justify-center gap-2 py-3 rounded-lg font-bold text-sm transition-all" style={{ background: expanded ? "var(--bg-hover)" : "linear-gradient(135deg, var(--accent) 0%, var(--accent-hover) 100%)", border: `1px solid ${expanded ? "var(--border-default)" : "var(--accent)"}`, color: expanded ? "var(--text-primary)" : "#000", cursor: "pointer" }}>
-          <IconFlame /> {isActive ? "En curso..." : expanded ? "Cancelar" : "Launch Warmup"}
-        </button>
-
-        {/* Expanded warmup panel */}
-        {expanded && !isActive && (
-          <div style={{ marginTop: 14, paddingTop: 14, borderTop: "1px solid var(--border-subtle)" }}>
-            {/* Account selector */}
-            <div className="mb-3">
-              <label className="block mb-1.5 text-xs font-medium" style={{ color: "var(--text-secondary)" }}>Cuenta</label>
-              {igAccounts.length > 0 ? (
-                <select value={account} onChange={e => setAccount(e.target.value)} className="w-full rounded-lg px-3 py-2.5 text-sm" style={{ background: "var(--bg-elevated)", border: "1px solid var(--border-subtle)", color: "var(--text-primary)" }}>
-                  {igAccounts.map(a => <option key={a.id} value={a.username}>@{a.username}</option>)}
-                </select>
-              ) : (
-                <input type="text" placeholder="@username" value={account} onChange={e => setAccount(e.target.value)} className="w-full rounded-lg px-3 py-2.5 text-sm" style={{ background: "var(--bg-elevated)", border: "1px solid var(--border-subtle)", color: "var(--text-primary)" }} />
-              )}
-            </div>
-            {/* Duration chips */}
-            <div className="mb-3">
-              <label className="block mb-1.5 text-xs font-medium" style={{ color: "var(--text-secondary)" }}>Duración</label>
-              <div className="flex gap-2">{["2", "5", "10", "20"].map(dm => (
-                <button key={dm} onClick={() => setDuration(dm)} className="flex-1 py-2 rounded-lg text-sm font-medium" style={duration === dm ? { background: "var(--accent)", color: "#000", border: "1px solid var(--accent)" } : { background: "var(--bg-elevated)", border: "1px solid var(--border-subtle)", color: "var(--text-secondary)", cursor: "pointer" }}>{dm}m</button>
-              ))}</div>
-            </div>
-            {/* Launch */}
-            <button onClick={launch} disabled={sending || !account} className="w-full flex items-center justify-center gap-2 py-3 rounded-lg font-bold text-sm transition-all hover:brightness-110 disabled:opacity-40" style={{ background: "var(--accent)", border: "1px solid var(--accent)", color: "#000", cursor: "pointer" }}>
-              {sending ? "Lanzando..." : "Confirmar"}
-            </button>
-            {msg && <p className="text-sm text-center mt-2" style={{ color: msg.startsWith("Error") ? "var(--error)" : "var(--accent)" }}>{msg}</p>}
-          </div>
-        )}
-      </div>
-    </div>
-  );
+  if (!canRunTasks) return <div className="cc-device-idle"><span>{activeRun ? "Tarea activa · solo lectura" : "Solo lectura"}</span>{activeRun && <StatusBadge status={activeRun.status} />}</div>;
+  return <div className="cc-launcher"><button className={`cc-button ${activeRun ? "cc-button-muted" : "cc-button-primary"} cc-button-wide`} onClick={() => setOpen((value) => !value)} disabled={!!activeRun && activeRun.status === "running"}><span>{activeRun ? "↯" : "＋"}</span>{activeRun ? "Tarea activa" : "Lanzar comando"}<span className="cc-button-caret">{open ? "⌃" : "⌄"}</span></button>{activeRun && <div className="cc-active-controls"><div className="cc-active-summary"><StatusBadge status={activeRun.status} /><span>{activeRun.task_type.startsWith("scan_") ? "Scan" : "Warmup"} · {platformInfo(taskPlatform(activeRun)).label}</span></div><div className="cc-control-row">{activeRun.status === "paused" ? <button onClick={() => void control("resume")} disabled={busy}>Continuar</button> : <button onClick={() => void control("pause")} disabled={busy}>Pausar</button>}<button className="is-danger" onClick={() => void control("stop")} disabled={busy}>Detener</button></div></div>}{open && !activeRun && <div className="cc-launch-panel"><div className="cc-mode-toggle"><button className={mode === "warmup" ? "is-selected" : ""} onClick={() => setMode("warmup")}>Warmup</button><button className={mode === "scan" ? "is-selected" : ""} onClick={() => setMode("scan")}>Scan</button></div><label>Plataforma<select value={platform} onChange={(event) => setPlatform(event.target.value as Platform)}>{PLATFORMS.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</select></label>{mode === "warmup" && <><label>Cuenta<select value={selectedAccount} onChange={(event) => setAccount(event.target.value)} disabled={!platformAccounts.length}><option value="">{platformAccounts.length ? "Seleccionar cuenta…" : "Sin cuentas escaneadas"}</option>{platformAccounts.map((item) => <option key={item.id} value={item.username}>@{item.username}</option>)}</select>{!platformAccounts.length && <small className="cc-launch-hint">Escaneá esta plataforma en este dispositivo para habilitar el warmup.</small>}</label><label>Duración<select value={duration} onChange={(event) => setDuration(event.target.value)}><option value="2">2 minutos</option><option value="5">5 minutos</option><option value="10">10 minutos</option><option value="20">20 minutos</option></select></label></>}<button className="cc-button cc-button-primary cc-button-wide" onClick={() => void launch()} disabled={busy || (mode === "warmup" && !selectedAccount)}>{busy ? "Enviando…" : mode === "warmup" ? "Iniciar warmup" : "Iniciar scan"}<span>→</span></button></div>}{message && <p className={`cc-inline-message ${message.includes("Error") || message.includes("No se") ? "is-error" : ""}`}>{message}</p>}</div>;
 }
 
-// ─── Fleet Page (uses DeviceCard) ─────────────────────────
-function FleetPage({ devices, loading, onRefresh, token }: { devices: Device[]; loading: boolean; onRefresh: () => void; token: string }) {
-  const [igAccountsMap, setIgAccountsMap] = useState<Record<number, IGAccount[]>>({});
-  const [sessions, setSessions] = useState<Session[]>([]);
-  const [activeRuns, setActiveRuns] = useState<Record<number, any>>({});
-  const [showQR, setShowQR] = useState(false);
-
-  const loadExtra = useCallback(() => {
-    if (!token) return;
-    devices.forEach(d => {
-      apiGet(`/api/ig-accounts?device_id=${d.id}`, token).then(data => {
-        setIgAccountsMap(prev => ({ ...prev, [d.id]: data.accounts || [] }));
-      }).catch(() => {});
-    });
-    apiGet("/api/warmup-sessions", token).then(data => {
-      setSessions(data.sessions || data || []);
-    }).catch(() => {});
-    // Fetch active task runs
-    apiGet("/api/tasks/runs", token).then(data => {
-      const active: Record<number, any> = {};
-      (data.runs || []).forEach((r: any) => {
-        if (r.status === "pending" || r.status === "running") {
-          active[r.device_id] = r;
-        }
-      });
-      setActiveRuns(active);
-    }).catch(() => {});
-  }, [devices, token]);
-
-  useEffect(() => { loadExtra(); }, [loadExtra]);
-
-  return (
-    <div>
-      {/* QR Modal */}
-      {showQR && (
-        <div onClick={() => setShowQR(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, cursor: "pointer" }}>
-          <div onClick={e => e.stopPropagation()} style={{ background: "var(--bg-surface)", border: "1px solid var(--border-subtle)", borderRadius: "var(--radius-lg)", padding: 32, maxWidth: 360, width: "90%", textAlign: "center", cursor: "default" }}>
-            <h3 style={{ fontSize: 18, fontWeight: 600, marginBottom: 8 }}>Add New Device</h3>
-            <p style={{ fontSize: 13, color: "var(--text-muted)", marginBottom: 20 }}>Scan with your Android phone to download SouthFarm</p>
-            <img src="/qr-download.png" alt="QR Code" width={200} height={200} style={{ margin: "0 auto 16px", borderRadius: 12, display: "block" }} />
-            <p style={{ fontSize: 11, color: "var(--text-muted)" }}>Or visit: <span style={{ color: "var(--accent)" }}>southfarm-webapp.vercel.app/southfarm.apk</span></p>
-            <button onClick={() => setShowQR(false)} style={{ marginTop: 16, padding: "8px 20px", borderRadius: "var(--radius-md)", border: "1px solid var(--border-subtle)", background: "var(--bg-elevated)", color: "var(--text-secondary)", cursor: "pointer", fontSize: 13 }}>Close</button>
-          </div>
-        </div>
-      )}
-      <div className="hidden lg:block" style={{ marginBottom: 28 }}>
-        <h2 style={{ fontSize: 26, fontWeight: 700, letterSpacing: -0.5, marginBottom: 6 }}>Device Fleet</h2>
-        <p style={{ color: "var(--text-secondary)", fontSize: 14 }}>Monitor, control and launch warmups on your devices</p>
-      </div>
-      <div className="lg:hidden flex justify-between items-center mb-6">
-        <h1 className="text-xl font-bold">Fleet</h1>
-        <button onClick={onRefresh} className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg" style={{ border: "1px solid var(--border-default)", background: "var(--bg-elevated)", color: "var(--text-secondary)", cursor: "pointer" }}>
-          {loading ? "..." : <><IconRefresh /> Refresh</>}
-        </button>
-      </div>
-
-      <div style={{ border: "1px solid var(--glass-border)", borderRadius: "var(--radius-lg)", overflow: "hidden" }}>
-        <div className="flex items-center justify-between px-5 py-4" style={{ borderBottom: "1px solid var(--border-subtle)" }}>
-          <div className="flex items-center gap-2.5">
-            <span style={{ color: "var(--accent)" }}><IconPhone /></span>
-            <h3 className="font-semibold" style={{ fontSize: 15 }}>Connected Devices</h3>
-          </div>
-          <div className="flex items-center gap-2.5">
-            <span className="px-2.5 py-1 rounded-full text-xs font-bold" style={{ background: "var(--success-dim)", color: "var(--success)" }}>{devices.length} online</span>
-            <button onClick={() => setShowQR(true)} className="flex items-center justify-center" style={{ width: 32, height: 32, borderRadius: "var(--radius-md)", border: "1px solid var(--accent)", background: "var(--success-dim)", color: "var(--accent)", fontSize: 18, fontWeight: 700, cursor: "pointer" }}>+</button>
-            <button onClick={onRefresh} className="hidden lg:flex items-center gap-1.5" style={{ padding: "7px 12px", fontSize: 12, fontWeight: 600, borderRadius: "var(--radius-md)", border: "1px solid var(--border-default)", background: "var(--bg-elevated)", color: "var(--text-primary)", cursor: "pointer" }}>
-              <IconRefresh /> Refresh
-            </button>
-          </div>
-        </div>
-
-        <div className="p-5">
-          {devices.length === 0 ? (
-            <div className="flex flex-col items-center py-16" style={{ color: "var(--text-muted)" }}>
-              <div style={{ marginBottom: 16, opacity: 0.5 }}><IconPhone /></div>
-              <p className="font-medium mb-1" style={{ color: "var(--text-secondary)" }}>No devices connected</p>
-              <p className="text-sm">Install SouthFarm on an Android phone to get started</p>
-            </div>
-          ) : (
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(340px, 1fr))", gap: 20 }}>
-              {devices.map(d => (
-                <DeviceCard key={d.id} d={d} token={token} igAccounts={igAccountsMap[d.id] || []} sessions={sessions} activeRun={activeRuns[d.id]} onLaunched={loadExtra} />
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ─── Warmup Page ───────────────────────────────────────
-// ─── History Page ──────────────────────────────────────
-function HistoryPage({ sessions }: { sessions: Session[] }) {
-  const tR = sessions.reduce((s, r) => s + (r.reels_viewed || 0), 0);
-  const tL = sessions.reduce((s, r) => s + (r.likes || 0), 0);
-  const tS = sessions.reduce((s, r) => s + (r.saves || 0), 0);
-  const tM = sessions.reduce((s, r) => s + Math.floor((r.elapsed_sec || 0) / 60), 0);
-
-  return (
-    <div>
-      <div className="hidden lg:block" style={{ marginBottom: 28 }}>
-        <h2 style={{ fontSize: 26, fontWeight: 700, letterSpacing: -0.5, marginBottom: 6 }}>Session History</h2>
-        <p style={{ color: "var(--text-secondary)", fontSize: 14 }}>All warmup sessions and their metrics</p>
-      </div>
-      <div className="lg:hidden flex justify-between items-center mb-6">
-        <h1 className="text-xl font-bold">History</h1>
-      </div>
-
-      {/* Stats */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-5 mb-7">
-        <MetricCard icon={<IconActivity />} value={sessions.length} label="Sessions" color="green" />
-        <MetricCard icon={<IconActivity />} value={tR} label="Reels Viewed" color="blue" />
-        <MetricCard icon={<IconActivity />} value={tL} label="Likes" color="yellow" />
-        <MetricCard icon={<IconActivity />} value={tM} label="Minutes" color="purple" />
-      </div>
-
-      <GlassCard title="Sessions" icon={<IconClock />}>
-        {sessions.length === 0 ? (
-          <div className="flex flex-col items-center py-12" style={{ color: "var(--text-muted)" }}>
-            <IconClock />
-            <p className="mt-2 text-sm">No sessions yet</p>
-          </div>
-        ) : (
-          <div className="space-y-0">
-            {sessions.map((s) => {
-              const colors = ["var(--info)", "var(--pink)", "var(--warning)"];
-              const c = colors[s.id % colors.length];
-              const bg = c === "var(--info)" ? "var(--info-dim)" : c === "var(--pink)" ? "rgba(244,114,182,0.12)" : "var(--warning-dim)";
-              return (
-                <div key={s.id} className="flex items-center py-3 gap-3" style={{ borderBottom: "1px solid var(--border-subtle)" }}>
-                  <div className="flex items-center justify-center flex-shrink-0" style={{ width: 28, height: 28, borderRadius: "50%", background: bg, color: c }}>
-                    {s.status === "completed" ? <IconCheck /> : <IconStop />}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="text-[13px] font-semibold" style={{ color: "var(--accent)" }}>@{s.account || "?"}</div>
-                    <div className="text-xs" style={{ color: "var(--text-muted)" }}>{fmtDate(s.timestamp)}</div>
-                  </div>
-                  <div className="hidden sm:flex gap-4 text-xs" style={{ color: "var(--text-secondary)" }}>
-                    <span style={{ color: "var(--info)" }}>{s.reels_viewed || 0} reels</span>
-                    <span style={{ color: "var(--pink)" }}>{s.likes || 0} likes</span>
-                    <span style={{ color: "var(--warning)" }}>{s.saves || 0} saves</span>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </GlassCard>
-    </div>
-  );
-}
-
-// ─── Settings Page ─────────────────────────────────────
-function SettingsPage({ userName, onLogout }: { userName: string; onLogout: () => void }) {
-  return (
-    <div>
-      <div className="hidden lg:block" style={{ marginBottom: 28 }}>
-        <h2 style={{ fontSize: 26, fontWeight: 700, letterSpacing: -0.5, marginBottom: 6 }}>Settings</h2>
-        <p style={{ color: "var(--text-secondary)", fontSize: 14 }}>Manage your account and preferences</p>
-      </div>
-      <div className="lg:hidden flex justify-between items-center mb-6">
-        <h1 className="text-xl font-bold">Settings</h1>
-      </div>
-
-      <GlassCard>
-        <div className="flex items-center gap-4 mb-6">
-          <div className="flex items-center justify-center" style={{ width: 56, height: 56, borderRadius: "50%", background: "var(--accent-dim)", color: "var(--accent)", fontSize: 24, fontWeight: 700 }}>
-            {userName.charAt(0).toUpperCase()}
-          </div>
-          <div>
-            <p className="font-semibold text-lg">{userName}</p>
-            <p className="text-sm" style={{ color: "var(--text-muted)" }}>Plan: Free</p>
-          </div>
-        </div>
-        <button onClick={onLogout} className="w-full py-3 rounded-[var(--radius-md)] font-medium transition-all hover:brightness-110" style={{ background: "var(--error-dim)", border: "1px solid rgba(239,68,68,0.3)", color: "var(--error)", cursor: "pointer" }}>
-          Cerrar sesion
-        </button>
-      </GlassCard>
-    </div>
-  );
-}
-
-// ─── Main App ──────────────────────────────────────────
-export default function Home() {
-  const [token, setToken] = useState<string | null>(null);
-  const [userName, setUserName] = useState("");
-  const [page, setPage] = useState<Page>("dashboard");
-  const [sessions, setSessions] = useState<Session[]>([]);
-  const [devices, setDevices] = useState<Device[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [ready, setReady] = useState(false);
-
-  const loadData = useCallback(async (t: string) => {
-    setLoading(true);
-    const [sData, dData] = await Promise.all([apiGet("/api/warmup-sessions", t), apiGet("/api/devices", t)]);
-    setSessions(sData.sessions || []);
-    setDevices(dData.devices || []);
-    setLoading(false);
-  }, []);
+function DevicePairingCard({ token, canManage }: { token: string; canManage: boolean }) {
+  const [pairing, setPairing] = useState<DevicePairing | null>(null);
+  const [qrDataUrl, setQrDataUrl] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState("");
+  const [open, setOpen] = useState(false);
 
   useEffect(() => {
-    const t = localStorage.getItem("token"), n = localStorage.getItem("userName");
-    if (t) { setToken(t); setUserName(n || ""); loadData(t); }
+    if (!pairing) return;
+    let cancelled = false;
+    void QRCode.toDataURL(pairing.qr_payload, {
+      width: 280,
+      margin: 2,
+      errorCorrectionLevel: "M",
+      color: { dark: "#08110b", light: "#f5fff7" },
+    }).then((value) => {
+      if (!cancelled) setQrDataUrl(value);
+    }).catch(() => {
+      if (!cancelled) setQrDataUrl("");
+    });
+    return () => { cancelled = true; };
+  }, [pairing]);
+
+  const createPairing = async () => {
+    setBusy(true);
+    setMessage("");
+    try {
+      const data = await request<{ pairing: DevicePairing }>("/api/devices/pairing-codes", token, {
+        method: "POST",
+        body: JSON.stringify({}),
+      });
+      setPairing(data.pairing);
+    } catch (cause) {
+      setMessage(cause instanceof Error ? cause.message : "No se pudo generar la vinculación");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const copy = async (value: string) => {
+    await navigator.clipboard?.writeText(value);
+    setMessage("Copiado al portapapeles");
+  };
+
+  const closePairing = () => {
+    setPairing(null);
+    setMessage("");
+    setOpen(false);
+  };
+
+  if (canManage && !open) return <section className="cc-card cc-pairing-card cc-pairing-collapsed"><button className="cc-button cc-button-primary" onClick={() => setOpen(true)}><span><b>Vincular un celular</b><small>Generar código temporal o QR</small></span><span>＋</span></button></section>;
+
+  return <section className="cc-card cc-pairing-card"><div className="cc-card-heading"><div><p className="cc-eyebrow cc-eyebrow-accent">SECURE ENROLLMENT</p><h3>Vincular un celular</h3><p className="cc-card-subtitle">Generá una credencial de un solo uso para registrar una nueva instalación en este workspace.</p></div><div className="cc-device-header-actions"><span className="cc-danger-mark">⌁</span>{canManage && <button className="cc-pairing-close" title="Cerrar vinculación" aria-label="Cerrar vinculación" onClick={closePairing}>×</button>}</div></div>{canManage ? <><div className="cc-pairing-actions"><button className="cc-button cc-button-primary" onClick={() => void createPairing()} disabled={busy}>{busy ? "Generando…" : pairing ? "Generar otro código" : "Generar código temporal"}<span>＋</span></button>{pairing && <span className="cc-pairing-expiry">Vence {fullDate(pairing.expires_at)}</span>}</div>{pairing && <div className="cc-pairing-result">{qrDataUrl && <div className="cc-pairing-qr"><img src={qrDataUrl} alt="QR temporal para vincular el celular" /><span>Escanealo desde SouthFarm</span></div>}<div className="cc-pairing-credentials"><div><span>CÓDIGO TEMPORAL</span><strong>{pairing.code}</strong><button className="cc-button cc-button-ghost" onClick={() => void copy(pairing.code)}>Copiar</button></div><div><span>LLAVE DE ACCESO</span><code>{pairing.access_key}</code><button className="cc-button cc-button-ghost" onClick={() => void copy(pairing.access_key)}>Copiar</button></div><small>El código y la llave se guardan con hash en el backend y solo sirven una vez.</small></div></div>}{message && <p className="cc-inline-message">{message}</p>}</> : <p className="cc-card-subtitle">Solo owner y admin pueden vincular nuevos celulares.</p>}</section>;
+}
+
+function DeviceCard({ device, accounts, activeRun, token, onChanged, canManage, canRunTasks, onRevoke }: { device: Device; accounts: SocialAccount[]; activeRun?: TaskRun; token: string; onChanged: () => void; canManage: boolean; canRunTasks: boolean; onRevoke: (id: number) => void }) {
+  const deviceAccounts = accounts.filter((account) => account.device_id === device.id);
+  const connectionStatus = device.connection_status || (device.online ? "online" : "offline");
+  const [editingAlias, setEditingAlias] = useState(false);
+  const [aliasDraft, setAliasDraft] = useState(device.alias || "");
+  const [savingAlias, setSavingAlias] = useState(false);
+  const [aliasError, setAliasError] = useState("");
+
+  const saveAlias = async () => {
+    setSavingAlias(true);
+    setAliasError("");
+    try {
+      await request(`/api/devices/${device.id}`, token, {
+        method: "PATCH",
+        body: JSON.stringify({ alias: aliasDraft.trim() || null }),
+      });
+      setEditingAlias(false);
+      onChanged();
+    } catch (cause) {
+      setAliasError(cause instanceof Error ? cause.message : "No se pudo guardar el alias");
+    } finally {
+      setSavingAlias(false);
+    }
+  };
+
+  const displayName = device.alias || device.device_name || "Android device";
+  return <article className={`cc-device-card ${device.online ? "is-online" : "is-offline"}`}><div className="cc-device-header"><div className={`cc-device-icon ${device.online ? "is-online" : ""}`}>▯</div><div className="cc-device-title"><div className="cc-device-name-row">{editingAlias ? <input className="cc-device-alias-input" value={aliasDraft} maxLength={40} autoFocus onChange={(event) => setAliasDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void saveAlias(); if (event.key === "Escape") setEditingAlias(false); }} aria-label="Alias del dispositivo" /> : <h3>{displayName}</h3>}{canManage && !editingAlias && <button className="cc-device-edit" title="Editar alias" onClick={() => { setAliasDraft(device.alias || ""); setAliasError(""); setEditingAlias(true); }}>✎</button>}<StatusBadge status={connectionStatus} /></div><span>{device.alias ? `${device.device_name || "Android device"} · ` : ""}{device.device_id}</span></div><div className="cc-device-header-actions"><button className="cc-icon-button" title="Copiar identificador" onClick={() => void navigator.clipboard?.writeText(device.device_id)}>⋯</button>{canManage && <button className="cc-icon-button cc-icon-danger" title="Revocar dispositivo" onClick={() => onRevoke(device.id)}>⌫</button>}</div></div>{editingAlias && <div className="cc-device-alias-actions"><button className="cc-button cc-button-primary" onClick={() => void saveAlias()} disabled={savingAlias}>{savingAlias ? "Guardando…" : "Guardar alias"}</button><button className="cc-button cc-button-ghost" onClick={() => setEditingAlias(false)} disabled={savingAlias}>Cancelar</button></div>}{aliasError && <p className="cc-inline-message is-error">{aliasError}</p>}<div className="cc-device-meta"><span><b>Android</b> {device.android_version || "—"}</span><span><b>App</b> {device.app_version || "—"}</span><span><b>Registro</b> #{device.id}</span><span><b>Señal</b> {relativeDate(device.last_seen_at)}</span></div><div className="cc-device-account-strip"><span>{deviceAccounts.length} cuentas vinculadas</span><div className="cc-avatar-stack">{PLATFORMS.map((platform) => <i key={platform.id} style={{ background: platform.color }} title={platform.label}>{deviceAccounts.filter((account) => account.platform === platform.id).length || "·"}</i>)}</div></div><TaskLauncher device={device} accounts={accounts} activeRun={activeRun} token={token} onChanged={onChanged} canRunTasks={canRunTasks} /></article>;
+}
+
+function FleetPage({ devices, accounts, runs, token, onChanged, canManageDevices, canRunTasks }: { devices: Device[]; accounts: SocialAccount[]; runs: TaskRun[]; token: string; onChanged: () => void; canManageDevices: boolean; canRunTasks: boolean }) {
+  const revoke = async (id: number) => {
+    if (!window.confirm("¿Revocar este celular? Dejará de aparecer en la flota y deberá vincularse nuevamente.")) return;
+    try {
+      await request(`/api/devices/${id}`, token, { method: "DELETE" });
+      onChanged();
+    } catch (cause) {
+      window.alert(cause instanceof Error ? cause.message : "No se pudo revocar el dispositivo");
+    }
+  };
+  return <div className="cc-page-stack"><section className="cc-section-intro"><div><p className="cc-eyebrow cc-eyebrow-accent">DEVICE CONTROL</p><h2>Tu flota, a la vista.</h2><p>La conexión y la ejecución se muestran como estados independientes.</p></div><div className="cc-intro-stats"><strong>{devices.filter((device) => device.online).length}<small>online</small></strong><span>/</span><strong>{devices.length}<small>activos</small></strong></div></section><DevicePairingCard token={token} canManage={canManageDevices} />{devices.length ? <div className="cc-device-grid">{devices.map((device) => <DeviceCard key={device.id} device={device} accounts={accounts} activeRun={runs.find((run) => run.device_id === device.id && ["pending", "running", "paused"].includes(run.status))} token={token} onChanged={onChanged} canManage={canManageDevices} canRunTasks={canRunTasks} onRevoke={(id) => void revoke(id)} />)}</div> : <section className="cc-card"><EmptyState title="No hay dispositivos registrados" detail="Vinculá un Android para que aparezca acá." /></section>}</div>;
+}
+
+function AccountsInventory({ accounts, devices }: { accounts: SocialAccount[]; devices: Device[] }) {
+  const [platform, setPlatform] = useState<Platform | "all">("all");
+  const [search, setSearch] = useState("");
+  const visible = accounts.filter((account) => (platform === "all" || account.platform === platform) && account.username.toLowerCase().includes(search.toLowerCase()));
+  return <div className="cc-page-stack"><section className="cc-section-intro"><div><p className="cc-eyebrow cc-eyebrow-accent">ACCOUNT INVENTORY</p><h2>Todas tus identidades sociales.</h2><p>La última fotografía de cuentas detectadas en los teléfonos.</p></div><div className="cc-intro-stats"><strong>{accounts.length}<small>cuentas</small></strong></div></section><section className="cc-card"><div className="cc-filter-row"><div className="cc-segmented cc-segmented-small"><button className={platform === "all" ? "is-selected" : ""} onClick={() => setPlatform("all")}>Todas</button>{PLATFORMS.map((item) => <button key={item.id} className={platform === item.id ? "is-selected" : ""} onClick={() => setPlatform(item.id)}>{item.short}</button>)}</div><input className="cc-filter-input" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar usuario…" /></div>{visible.length ? <div className="cc-account-grid">{visible.map((account) => <article className="cc-account-card" key={account.id}><div className="cc-account-avatar" style={{ color: platformInfo(account.platform).color, background: `${platformInfo(account.platform).color}15` }}>{account.username.charAt(0).toUpperCase()}</div><div className="cc-account-main"><div className="cc-account-top"><strong>@{account.username}</strong><PlatformBadge platform={account.platform} /></div><span>{account.display_name || account.byline || "Sin nombre público"}</span><small>{devices.find((device) => device.id === account.device_id)?.device_name || "Dispositivo sin nombre"}</small></div></article>)}</div> : <EmptyState title="No hay cuentas para este filtro" detail="Ejecutá un scan desde la flota para descubrirlas." />}</section></div>;
+}
+
+function AccountsPage({ accounts, devices, token, onChanged, canManage }: { accounts: SocialAccount[]; devices: Device[]; token: string; onChanged: () => void; canManage: boolean }) {
+  const [cleanPlatforms, setCleanPlatforms] = useState<Platform[]>(["instagram"]);
+  const [deviceScope, setDeviceScope] = useState("all");
+  const [cleaning, setCleaning] = useState(false);
+  const [message, setMessage] = useState("");
+  const togglePlatform = (next: Platform) => setCleanPlatforms((current) => current.includes(next) ? current.filter((item) => item !== next) : [...current, next]);
+  const cleanAccounts = async () => {
+    if (!cleanPlatforms.length) return;
+    const scopeLabel = deviceScope === "all" ? "todos los dispositivos" : "el dispositivo seleccionado";
+    if (!window.confirm(`¿Limpiar las cuentas de ${cleanPlatforms.length} plataforma(s) en ${scopeLabel}? El historial no se borra.`)) return;
+    setCleaning(true); setMessage("");
+    try {
+      const body: { platforms: Platform[]; device_id?: string } = { platforms: cleanPlatforms };
+      if (deviceScope !== "all") body.device_id = deviceScope;
+      const result = await request<{ total: number }>("/api/social-accounts", token, { method: "DELETE", body: JSON.stringify(body) });
+      setMessage(`Se limpiaron ${result.total} registros. El historial de scans quedó preservado.`);
+      onChanged();
+    } catch (cause) {
+      setMessage(cause instanceof Error ? cause.message : "No se pudieron limpiar las cuentas");
+    } finally {
+      setCleaning(false);
+    }
+  };
+  return <div className="cc-page-stack"><SchedulerPanel token={token} canManage={canManage} onChanged={onChanged} /><AccountsInventory accounts={accounts} devices={devices} /><section className="cc-card cc-clean-card"><div className="cc-card-heading"><div><p className="cc-eyebrow">INVENTORY RESET</p><h3>Clean accounts</h3><p className="cc-card-subtitle">Borra las cuentas escaneadas seleccionadas; no borra el historial de scans ni warmups.</p></div><span className="cc-danger-mark">⌫</span></div><div className="cc-clean-grid"><div><span className="cc-form-caption">PLATAFORMAS</span><div className="cc-clean-platforms">{PLATFORMS.map((item) => <button key={item.id} className={cleanPlatforms.includes(item.id) ? "is-selected" : ""} onClick={() => togglePlatform(item.id)}>{item.label}</button>)}<button className={cleanPlatforms.length === PLATFORMS.length ? "is-selected" : ""} onClick={() => setCleanPlatforms(PLATFORMS.map((item) => item.id))}>Todas</button></div></div><label className="cc-form-label">DISPOSITIVO<select className="cc-filter-select" value={deviceScope} onChange={(event) => setDeviceScope(event.target.value)}><option value="all">Todos los dispositivos</option>{devices.map((device) => <option key={device.device_id} value={device.device_id}>{device.device_name || device.device_id}</option>)}</select></label></div><div className="cc-clean-footer"><span>{cleanPlatforms.length ? `${cleanPlatforms.length} plataforma${cleanPlatforms.length === 1 ? "" : "s"} seleccionada${cleanPlatforms.length === 1 ? "" : "s"}` : "Seleccioná al menos una plataforma"}</span><button className="cc-button cc-button-danger" onClick={() => void cleanAccounts()} disabled={cleaning || !cleanPlatforms.length}>{cleaning ? "Limpiando…" : "Clean selected accounts"}<span>⌫</span></button></div>{message && <p className="cc-inline-message">{message}</p>}</section></div>;
+}
+
+function HistoryPage({ sessions, scans }: { sessions: WarmupSession[]; scans: ScanSession[] }) {
+  const [tab, setTab] = useState<"warmups" | "scans">("warmups");
+  const [platform, setPlatform] = useState<Platform | "all">("all");
+  const warmups = sessions.filter((session) => platform === "all" || session.platform === platform);
+  const visibleScans = scans.filter((scan) => platform === "all" || scan.platform === platform);
+  const totalVideos = sessions.reduce((sum, session) => sum + numberValue(session.videos_viewed || session.reels_viewed), 0);
+  const totalLikes = sessions.reduce((sum, session) => sum + numberValue(session.likes), 0);
+  return <div className="cc-page-stack"><section className="cc-section-intro"><div><p className="cc-eyebrow cc-eyebrow-accent">AUDIT TRAIL</p><h2>Todo lo que pasó, registrado.</h2><p>Historial de warmups y scans por plataforma, cuenta y dispositivo.</p></div><div className="cc-intro-stats"><strong>{totalVideos}<small>videos</small></strong><strong>{totalLikes}<small>likes</small></strong></div></section><section className="cc-card"><div className="cc-history-toolbar"><div className="cc-segmented cc-segmented-small"><button className={tab === "warmups" ? "is-selected" : ""} onClick={() => setTab("warmups")}>Warmups <b>{warmups.length}</b></button><button className={tab === "scans" ? "is-selected" : ""} onClick={() => setTab("scans")}>Scans <b>{visibleScans.length}</b></button></div><select className="cc-filter-select" value={platform} onChange={(event) => setPlatform(event.target.value as Platform | "all")}><option value="all">Todas las plataformas</option>{PLATFORMS.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</select></div>{tab === "warmups" ? <HistoryWarmups sessions={warmups} /> : <HistoryScans scans={visibleScans} />}</section></div>;
+}
+
+function HistoryWarmups({ sessions }: { sessions: WarmupSession[] }) {
+  if (!sessions.length) return <EmptyState title="Sin warmups todavía" detail="Cuando un teléfono termine una sesión, la vas a ver acá." />;
+  return <div className="cc-history-list">{sessions.map((session) => <div className="cc-history-row" key={session.id}><div className="cc-history-symbol" style={{ color: platformInfo(session.platform).color }}>{platformInfo(session.platform).short}</div><div className="cc-history-main"><div><strong>@{session.account || "sin cuenta"}</strong><PlatformBadge platform={session.platform} /></div><span>{session.device_name || "Dispositivo"} · {fullDate(session.timestamp)}</span></div><div className="cc-history-metrics"><span><b>{numberValue(session.videos_viewed || session.reels_viewed)}</b> videos</span><span><b>{numberValue(session.likes)}</b> likes</span><span><b>{numberValue(session.saves)}</b> saves</span></div><StatusBadge status={session.status} /></div>)}</div>;
+}
+
+function HistoryScans({ scans }: { scans: ScanSession[] }) {
+  if (!scans.length) return <EmptyState title="Sin scans todavía" detail="Lanzá un scan desde un dispositivo conectado." />;
+  return <div className="cc-history-list">{scans.map((scan) => <div className="cc-history-row" key={scan.id}><div className="cc-history-symbol" style={{ color: platformInfo(scan.platform).color }}>⌕</div><div className="cc-history-main"><div><strong>{platformInfo(scan.platform).label}</strong><PlatformBadge platform={scan.platform} /></div><span>{scan.device_name || "Dispositivo"} · {fullDate(scan.completed_at || scan.created_at)}</span></div><div className="cc-history-metrics"><span><b>{numberValue(scan.accounts_found)}</b> cuentas</span><span><b>#{scan.id}</b> scan</span></div><StatusBadge status={scan.status} /></div>)}</div>;
+}
+
+function TeamPage({ user, token, members, onChanged }: { user: User; token: string; members: TeamMember[]; onChanged: () => void }) {
+  const canManage = user.role === "owner" || user.role === "admin";
+  const [email, setEmail] = useState("");
+  const [role, setRole] = useState<Exclude<Role, "owner">>("operator");
+  const [invite, setInvite] = useState<Invite | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState("");
+  const createInvite = async () => {
+    setBusy(true); setMessage("");
+    try {
+      const result = await request<{ invite: Invite }>("/api/team/invites", token, { method: "POST", body: JSON.stringify({ email: email.trim() || undefined, role, expires_in_days: 7 }) });
+      setInvite(result.invite); setEmail("");
+    } catch (cause) { setMessage(cause instanceof Error ? cause.message : "No se pudo crear la invitación"); } finally { setBusy(false); }
+  };
+  const changeRole = async (member: TeamMember, nextRole: Role) => {
+    if (member.role === "owner" || nextRole === "owner") return;
+    try { await request(`/api/team/members/${member.id}`, token, { method: "PATCH", body: JSON.stringify({ role: nextRole }) }); onChanged(); } catch (cause) { setMessage(cause instanceof Error ? cause.message : "No se pudo actualizar el rol"); }
+  };
+  return <div className="cc-page-stack"><section className="cc-section-intro"><div><p className="cc-eyebrow cc-eyebrow-accent">ACCESS CONTROL</p><h2>Un equipo, distintos permisos.</h2><p>Supervisá quién puede mirar, operar o administrar tu workspace.</p></div><div className="cc-intro-stats"><strong>{members.length}<small>miembros</small></strong></div></section><div className="cc-two-column cc-team-layout"><section className="cc-card"><div className="cc-card-heading"><div><p className="cc-eyebrow">WORKSPACE MEMBERS</p><h3>Miembros activos</h3></div><span className="cc-role-note">Tu rol: {user.role}</span></div><div className="cc-team-list">{members.map((member) => <div className="cc-team-row" key={member.id}><div className="cc-avatar">{member.name.charAt(0).toUpperCase()}</div><div className="cc-row-copy"><strong>{member.name}{member.id === user.id && <small> · vos</small>}</strong><span>{member.email}</span></div>{canManage && member.role !== "owner" ? <select className="cc-role-select" value={member.role} onChange={(event) => void changeRole(member, event.target.value as Role)}><option value="admin" disabled={user.role !== "owner"}>admin</option><option value="operator">operator</option><option value="viewer">viewer</option></select> : <span className={`cc-role-pill role-${member.role}`}>{member.role}</span>}<span className={`cc-member-status ${member.status !== "active" ? "is-disabled" : ""}`}>{member.status === "active" ? "activo" : "pausado"}</span></div>)}</div></section><section className="cc-card"><div className="cc-card-heading"><div><p className="cc-eyebrow">INVITATIONS</p><h3>Sumar una persona</h3></div></div>{canManage ? <><label className="cc-form-label">Email <span>opcional si compartís el código</span><input className="cc-filter-input cc-input-wide" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="equipo@agencia.com" /></label><label className="cc-form-label">Permiso<select className="cc-filter-select cc-input-wide" value={role} onChange={(event) => setRole(event.target.value as Exclude<Role, "owner">)}><option value="operator">operator · puede operar dispositivos</option><option value="viewer">viewer · solo lectura</option><option value="admin" disabled={user.role !== "owner"}>admin · gestiona el equipo</option></select></label><button className="cc-button cc-button-primary cc-button-wide" onClick={() => void createInvite()} disabled={busy}>{busy ? "Creando…" : "Generar invitación"}<span>→</span></button>{invite && <div className="cc-invite-result"><span>Código listo · vence {fullDate(invite.expires_at)}</span><code>{invite.token}</code><button className="cc-button cc-button-ghost cc-button-wide" onClick={() => void navigator.clipboard?.writeText(invite.token || "")}>Copiar código</button></div>}{message && <p className="cc-inline-message is-error">{message}</p>}</> : <EmptyState title="Vista de solo lectura" detail="Pedile al owner que te otorgue permisos de administración." />}</section></div></div>;
+}
+
+function SettingsPage({ user, onLogout }: { user: User; onLogout: () => void }) {
+  return <div className="cc-page-stack"><section className="cc-section-intro"><div><p className="cc-eyebrow cc-eyebrow-accent">WORKSPACE SETTINGS</p><h2>Configuración del centro.</h2><p>Datos de tu cuenta y del workspace actual.</p></div></section><section className="cc-card cc-settings-card"><div className="cc-settings-profile"><div className="cc-avatar cc-avatar-large">{user.name.charAt(0).toUpperCase()}</div><div><h3>{user.name}</h3><p>{user.email}</p><span className={`cc-role-pill role-${user.role}`}>{user.role}</span></div></div><div className="cc-settings-grid"><div><span>Workspace</span><strong>{user.workspace.name}</strong></div><div><span>Workspace ID</span><strong>#{user.workspace.id}</strong></div><div><span>Permiso actual</span><strong>{user.role}</strong></div><div><span>API</span><strong className="cc-api-value"><span className="cc-online-dot" /> Conectada</strong></div></div><button className="cc-button cc-button-danger" onClick={onLogout}>Cerrar sesión</button></section></div>;
+}
+
+export default function Home() {
+  const [token, setToken] = useState<string | null>(null);
+  const [user, setUser] = useState<User | null>(null);
+  const [page, setPage] = useState<Page>("overview");
+  const [devices, setDevices] = useState<Device[]>([]);
+  const [accounts, setAccounts] = useState<SocialAccount[]>([]);
+  const [runs, setRuns] = useState<TaskRun[]>([]);
+  const [sessions, setSessions] = useState<WarmupSession[]>([]);
+  const [scans, setScans] = useState<ScanSession[]>([]);
+  const [members, setMembers] = useState<TeamMember[]>([]);
+  const [stats, setStats] = useState<Stats>({ totals: { total_sessions: 0, completed_sessions: 0, reels_viewed: 0, videos_viewed: 0, shorts_viewed: 0, likes: 0, saves: 0, elapsed_sec: 0 }, by_platform: [], scans: [] });
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [lastUpdated, setLastUpdated] = useState("");
+  const [ready, setReady] = useState(false);
+
+  const logout = useCallback(() => {
+    window.localStorage.removeItem("southfarm_token");
+    window.localStorage.removeItem("southfarm_user");
+    setToken(null); setUser(null);
+  }, []);
+
+  const refresh = useCallback(async (activeToken: string) => {
+    setBusy(true); setError("");
+    try {
+      const [me, deviceData, accountData, runData, sessionData, scanData, statData, memberData] = await Promise.all([
+        request<{ user: User }>("/api/auth/me", activeToken),
+        request<{ devices: Device[] }>("/api/devices", activeToken),
+        request<{ accounts: SocialAccount[] }>("/api/social-accounts?platform=all", activeToken),
+        request<{ runs: TaskRun[] }>("/api/tasks/runs?limit=200", activeToken),
+        request<{ sessions: WarmupSession[] }>("/api/warmup-sessions?platform=all&limit=200", activeToken),
+        request<{ sessions: ScanSession[] }>("/api/scan-sessions?platform=all&limit=200", activeToken),
+        request<Stats>("/api/stats/overview?platform=all", activeToken),
+        request<{ members: TeamMember[] }>("/api/team/members", activeToken),
+      ]);
+      const nextUser = me.user;
+      setUser(nextUser);
+      setDevices(deviceData.devices || []);
+      setAccounts(accountData.accounts || []);
+      setRuns((runData.runs || []).map((run) => ({ ...run, params: parseObject(run.params), result: parseObject(run.result) })));
+      setSessions(sessionData.sessions || []);
+      setScans(scanData.sessions || []);
+      setStats(statData);
+      setMembers(memberData.members || []);
+      window.localStorage.setItem("southfarm_user", JSON.stringify(nextUser));
+      setLastUpdated(new Date().toISOString());
+    } catch (cause) {
+      if (cause instanceof ApiError && [401, 403].includes(cause.status)) logout();
+      else setError(cause instanceof Error ? cause.message : "No se pudieron cargar los datos");
+    } finally {
+      setBusy(false);
+    }
+  }, [logout]);
+
+  const handleAuth = useCallback((nextToken: string, nextUser: User) => {
+    window.localStorage.setItem("southfarm_token", nextToken);
+    window.localStorage.setItem("southfarm_user", JSON.stringify(nextUser));
+    setToken(nextToken); setUser(nextUser); void refresh(nextToken);
+  }, [refresh]);
+
+  const restoreSession = useCallback(() => {
+    const storedToken = window.localStorage.getItem("southfarm_token");
+    const storedUser = parseObject(window.localStorage.getItem("southfarm_user")) as unknown as User;
+    if (storedToken) {
+      setToken(storedToken);
+      if (storedUser?.id) setUser(storedUser);
+      void refresh(storedToken);
+    }
     setReady(true);
-  }, [loadData]);
+  }, [refresh]);
 
-  if (!ready) return null;
-  if (!token) return <AuthPage onAuth={(t, n) => { setToken(t); setUserName(n); loadData(t); }} />;
+  useEffect(() => {
+    const task = window.setTimeout(restoreSession, 0);
+    return () => window.clearTimeout(task);
+  }, [restoreSession]);
 
-  const logout = () => { localStorage.removeItem("token"); localStorage.removeItem("userName"); setToken(null); };
+  useEffect(() => {
+    if (!token) return;
+    const interval = window.setInterval(() => void refresh(token), 10000);
+    return () => window.clearInterval(interval);
+  }, [token, refresh]);
 
-  const pageTitles: Record<Page, string> = { dashboard: "Dashboard", fleet: "Fleet", history: "History", settings: "Settings" };
+  if (!ready) return <div className="cc-loading-screen"><div className="cc-brand-mark">SF</div></div>;
+  if (!token || !user) return <AuthPage onAuth={handleAuth} />;
 
-  return (
-    <div className="flex h-screen overflow-hidden">
-      <Sidebar current={page} onNav={setPage} deviceCount={devices.length} />
-      <div className="flex-1 flex flex-col overflow-hidden min-w-0">
-        <TopBar title={pageTitles[page]} onSync={() => loadData(token!)} loading={loading} />
-        <main className="flex-1 overflow-y-auto p-5 lg:p-7 pb-24 lg:pb-7" style={{ scrollBehavior: "smooth" }}>
-          {page === "dashboard" && <DashboardPage sessions={sessions} devices={devices} />}
-          {page === "fleet" && <FleetPage devices={devices} loading={loading} onRefresh={() => loadData(token!)} token={token!} />}
-          
-          {page === "history" && <HistoryPage sessions={sessions} />}
-          {page === "settings" && <SettingsPage userName={userName} onLogout={logout} />}
-        </main>
-      </div>
-      <MobileNav current={page} onNav={setPage} />
-    </div>
-  );
+  const pageContent = page === "overview"
+    ? <DashboardPage devices={devices} accounts={accounts} runs={runs} sessions={sessions} scans={scans} stats={stats} onNavigate={setPage} />
+    : page === "fleet"
+      ? <FleetPage devices={devices} accounts={accounts} runs={runs} token={token} onChanged={() => void refresh(token)} canManageDevices={user.role === "owner" || user.role === "admin"} canRunTasks={user.role !== "viewer"} />
+      : page === "accounts"
+         ? <AccountsPage accounts={accounts} devices={devices} token={token} onChanged={() => void refresh(token)} canManage={user.role !== "viewer"} />
+        : page === "history"
+          ? <HistoryPage sessions={sessions} scans={scans} />
+          : page === "team"
+            ? <TeamPage user={user} token={token} members={members} onChanged={() => void refresh(token)} />
+            : <SettingsPage user={user} onLogout={logout} />;
+
+  return <div className="cc-app-shell"><Sidebar page={page} user={user} onNavigate={setPage} onLogout={logout} /><div className="cc-main"><Topbar page={page} user={user} lastUpdated={lastUpdated} busy={busy} onRefresh={() => void refresh(token)} /><main className="cc-content">{error && <div className="cc-alert cc-alert-error cc-global-alert">{error}<button onClick={() => setError("")}>×</button></div>}{pageContent}</main></div><MobileNav page={page} onNavigate={setPage} /></div>;
 }
