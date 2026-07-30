@@ -7,6 +7,22 @@ import { SchedulerPanel } from "./scheduler-panel";
 
 const API = (process.env.NEXT_PUBLIC_API_URL || "https://api.southfarm.tech").replace(/\/$/, "");
 
+type ApiHealthState = "checking" | "online" | "degraded" | "offline";
+
+interface ApiHealth {
+  state: ApiHealthState;
+  status?: string;
+  checkedAt: string | null;
+  timestamp?: string | null;
+  latencyMs?: number | null;
+  uptimeSeconds?: number | null;
+  database?: string | null;
+  nodeVersion?: string | null;
+  error?: string;
+}
+
+const INITIAL_API_HEALTH: ApiHealth = { state: "checking", checkedAt: null };
+
 type Role = "owner" | "admin" | "operator" | "viewer";
 type Platform = "instagram" | "tiktok" | "youtube";
 type Page = "overview" | "fleet" | "accounts" | "history" | "team" | "settings";
@@ -181,6 +197,49 @@ async function request<T>(path: string, token?: string, init: RequestInit = {}):
   return data as T;
 }
 
+async function checkApiHealth(): Promise<ApiHealth> {
+  const startedAt = performance.now();
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), 5000);
+
+  try {
+    const response = await fetch(`${API}/api/health`, {
+      cache: "no-store",
+      signal: controller.signal,
+    });
+    const data = await response.json().catch(() => ({})) as Record<string, unknown>;
+    const latencyMs = Math.max(0, Math.round(performance.now() - startedAt));
+    const status = typeof data.status === "string" ? data.status : response.ok ? "ok" : "error";
+
+    return {
+      state: response.ok && status === "ok" ? "online" : "degraded",
+      status,
+      checkedAt: new Date().toISOString(),
+      timestamp: typeof data.timestamp === "string" ? data.timestamp : null,
+      latencyMs,
+      uptimeSeconds: numberValue(data.uptime_seconds),
+      database: typeof data.database === "string" ? data.database : null,
+      nodeVersion: typeof data.node_version === "string" ? data.node_version : null,
+      error: response.ok ? undefined : `HTTP ${response.status}`,
+    };
+  } catch (cause) {
+    const message = cause instanceof DOMException && cause.name === "AbortError"
+      ? "Tiempo de espera agotado"
+      : cause instanceof Error
+        ? cause.message
+        : "No se pudo alcanzar la API";
+    return {
+      state: "offline",
+      status: "offline",
+      checkedAt: new Date().toISOString(),
+      latencyMs: Math.max(0, Math.round(performance.now() - startedAt)),
+      error: message,
+    };
+  } finally {
+    window.clearTimeout(timeoutId);
+  }
+}
+
 function parseObject(value: unknown): Record<string, unknown> {
   if (value && typeof value === "object") return value as Record<string, unknown>;
   if (typeof value === "string" && value.trim()) {
@@ -228,6 +287,32 @@ function fullDate(value?: string | null): string {
   return Number.isFinite(parsed.getTime())
     ? parsed.toLocaleString("es-AR", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })
     : "—";
+}
+
+function healthLabel(health: ApiHealth): string {
+  if (health.state === "online") return "API operativa";
+  if (health.state === "degraded") return "API degradada";
+  if (health.state === "offline") return "API sin respuesta";
+  return "Verificando API";
+}
+
+function healthDetail(health: ApiHealth): string {
+  if (health.state === "online") {
+    return health.latencyMs === null || health.latencyMs === undefined ? "Ruta pública activa" : `${health.latencyMs} ms · ruta pública activa`;
+  }
+  if (health.state === "degraded") return health.database === "error" ? "Base de datos con errores" : health.error || "El backend respondió con advertencias";
+  if (health.state === "offline") return health.error || "Cloudflare o el backend no responden";
+  return "Comprobando navegador → Cloudflare → Windows";
+}
+
+function formatUptime(seconds?: number | null): string {
+  if (!seconds || seconds < 1) return "—";
+  const days = Math.floor(seconds / 86400);
+  const hours = Math.floor((seconds % 86400) / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  if (days) return `${days}d ${hours}h`;
+  if (hours) return `${hours}h ${minutes}m`;
+  return `${minutes}m`;
 }
 
 function statusText(status: string): string {
@@ -336,7 +421,11 @@ function AuthPage({ onAuth }: { onAuth: (token: string, user: User) => void }) {
   );
 }
 
-function Sidebar({ page, user, onNavigate, onLogout }: { page: Page; user: User; onNavigate: (next: Page) => void; onLogout: () => void }) {
+function ApiHealthIndicator({ health, compact = false }: { health: ApiHealth; compact?: boolean }) {
+  return <div className={`cc-api-health cc-health-state-${health.state}`} title={healthDetail(health)}><span className="cc-health-dot" /><strong>{healthLabel(health)}</strong>{!compact && <><span>·</span><span>{healthDetail(health)}</span></>}</div>;
+}
+
+function Sidebar({ page, user, health, onNavigate, onLogout }: { page: Page; user: User; health: ApiHealth; onNavigate: (next: Page) => void; onLogout: () => void }) {
   return (
     <aside className="cc-sidebar">
       <div className="cc-sidebar-top">
@@ -351,7 +440,8 @@ function Sidebar({ page, user, onNavigate, onLogout }: { page: Page; user: User;
       </nav>
       <div className="cc-sidebar-bottom">
         <div className="cc-user-chip"><div className="cc-avatar">{user.name.charAt(0).toUpperCase()}</div><div className="cc-user-copy"><strong>{user.name}</strong><span>{user.role}</span></div><button className="cc-icon-button" title="Cerrar sesión" onClick={onLogout}>↪</button></div>
-        <div className="cc-api-health"><span className="cc-online-dot" /> API conectada <span>·</span> {API.replace("https://", "")}</div>
+        <ApiHealthIndicator health={health} />
+        <div className="cc-api-endpoint">{API.replace("https://", "")}</div>
       </div>
     </aside>
   );
@@ -362,9 +452,9 @@ function MobileNav({ page, onNavigate }: { page: Page; onNavigate: (next: Page) 
   return <nav className="cc-mobile-nav">{items.map((item) => <button key={item.id} className={page === item.id ? "is-active" : ""} onClick={() => onNavigate(item.id)}><Glyph>{item.glyph}</Glyph><span>{item.label.split(" ")[0]}</span></button>)}</nav>;
 }
 
-function Topbar({ page, user, lastUpdated, busy, onRefresh }: { page: Page; user: User; lastUpdated: string; busy: boolean; onRefresh: () => void }) {
+function Topbar({ page, user, health, lastUpdated, busy, onRefresh }: { page: Page; user: User; health: ApiHealth; lastUpdated: string; busy: boolean; onRefresh: () => void }) {
   const title = PAGES.find((item) => item.id === page)?.label || "Command center";
-  return <header className="cc-topbar"><div><p className="cc-eyebrow">SOUTHFARM / {user.workspace.name.toUpperCase()}</p><h1>{title}</h1></div><div className="cc-topbar-actions"><span className="cc-last-sync">Actualizado {relativeDate(lastUpdated)}</span><button className="cc-button cc-button-ghost" onClick={onRefresh} disabled={busy}><Glyph>↻</Glyph>{busy ? "Sincronizando" : "Sync"}</button><div className="cc-topbar-avatar">{user.name.charAt(0).toUpperCase()}</div></div></header>;
+  return <header className="cc-topbar"><div><p className="cc-eyebrow">SOUTHFARM / {user.workspace.name.toUpperCase()}</p><h1>{title}</h1></div><div className="cc-topbar-actions"><ApiHealthIndicator health={health} compact /><span className="cc-last-sync">Actualizado {relativeDate(lastUpdated)}</span><button className="cc-button cc-button-ghost" onClick={onRefresh} disabled={busy}><Glyph>↻</Glyph>{busy ? "Sincronizando" : "Sync"}</button><div className="cc-topbar-avatar">{user.name.charAt(0).toUpperCase()}</div></div></header>;
 }
 
 function MetricCard({ label, value, detail, glyph, tone }: { label: string; value: string | number; detail: string; glyph: string; tone: string }) {
@@ -375,7 +465,14 @@ function EmptyState({ title, detail }: { title: string; detail: string }) {
   return <div className="cc-empty"><div className="cc-empty-mark">⌁</div><strong>{title}</strong><span>{detail}</span></div>;
 }
 
-function DashboardPage({ devices, accounts, runs, sessions, scans, stats, onNavigate }: { devices: Device[]; accounts: SocialAccount[]; runs: TaskRun[]; sessions: WarmupSession[]; scans: ScanSession[]; stats: Stats; onNavigate: (page: Page) => void }) {
+function HealthPanel({ health }: { health: ApiHealth }) {
+  return <section className={`cc-card cc-health-panel cc-health-${health.state}`}>
+    <div className="cc-health-panel-heading"><div><p className="cc-eyebrow cc-eyebrow-accent">SYSTEM HEALTH</p><h3>Ruta pública del centro</h3><p>Browser → Cloudflare → Windows backend → SQLite</p></div><div className="cc-health-status"><span className="cc-health-dot" /><div><strong>{healthLabel(health)}</strong><small>{healthDetail(health)}</small></div></div></div>
+    <div className="cc-health-facts"><div><span>Último check</span><strong>{health.checkedAt ? fullDate(health.checkedAt) : "—"}</strong></div><div><span>Latencia</span><strong>{health.latencyMs === null || health.latencyMs === undefined ? "—" : `${health.latencyMs} ms`}</strong></div><div><span>Base de datos</span><strong>{health.database || "—"}</strong></div><div><span>Uptime backend</span><strong>{formatUptime(health.uptimeSeconds)}</strong></div></div>
+  </section>;
+}
+
+function DashboardPage({ devices, accounts, runs, sessions, scans, stats, health, onNavigate }: { devices: Device[]; accounts: SocialAccount[]; runs: TaskRun[]; sessions: WarmupSession[]; scans: ScanSession[]; stats: Stats; health: ApiHealth; onNavigate: (page: Page) => void }) {
   const online = devices.filter((device) => device.online).length;
   const activeRuns = runs.filter((run) => ["pending", "running", "paused"].includes(run.status));
   const totals = stats.totals || { total_sessions: sessions.length, reels_viewed: 0, likes: 0, saves: 0, elapsed_sec: 0, completed_sessions: 0, videos_viewed: 0, shorts_viewed: 0 };
@@ -383,6 +480,7 @@ function DashboardPage({ devices, accounts, runs, sessions, scans, stats, onNavi
 
   return <div className="cc-page-stack">
     <section className="cc-hero"><div><p className="cc-eyebrow cc-eyebrow-accent">LIVE OPERATIONS</p><h2>Buen día. Esta es tu <em>señal de mando.</em></h2><p>Monitoreá la salud de la flota y mantené los warmups en movimiento.</p></div><div className="cc-hero-orbit"><span /><span /><span /><strong>{online}</strong><small>devices<br />online</small></div></section>
+    <HealthPanel health={health} />
     <div className="cc-kpi-grid"><MetricCard label="Dispositivos online" value={`${online}/${devices.length}`} detail={online === devices.length && devices.length ? "Flota operativa" : "Revisar conexión"} glyph="◉" tone="green" /><MetricCard label="Tareas activas" value={activeRuns.length} detail={activeRuns.length ? "Comandos en curso" : "Sin tareas pendientes"} glyph="↯" tone="blue" /><MetricCard label="Warmups registrados" value={totals.total_sessions} detail={`${totals.completed_sessions || 0} completados`} glyph="◌" tone="orange" /><MetricCard label="Cuentas detectadas" value={accounts.length} detail={`${scans.length} scans registrados`} glyph="◎" tone="purple" /></div>
     <div className="cc-two-column">
       <section className="cc-card cc-card-tall"><div className="cc-card-heading"><div><p className="cc-eyebrow">COMMAND QUEUE</p><h3>Actividad en vivo</h3></div><button className="cc-link-button" onClick={() => onNavigate("fleet")}>Ver flota →</button></div>{activeRuns.length ? <div className="cc-operation-list">{activeRuns.slice(0, 5).map((run) => <OperationRow key={run.id} run={run} device={devices.find((device) => device.id === run.device_id)} />)}</div> : <EmptyState title="No hay comandos activos" detail="Lanzá un warmup o scan desde la flota." />}</section>
@@ -619,8 +717,8 @@ function TeamPage({ user, token, members, onChanged }: { user: User; token: stri
   return <div className="cc-page-stack"><section className="cc-section-intro"><div><p className="cc-eyebrow cc-eyebrow-accent">ACCESS CONTROL</p><h2>Un equipo, distintos permisos.</h2><p>Supervisá quién puede mirar, operar o administrar tu workspace.</p></div><div className="cc-intro-stats"><strong>{members.length}<small>miembros</small></strong></div></section><div className="cc-two-column cc-team-layout"><section className="cc-card"><div className="cc-card-heading"><div><p className="cc-eyebrow">WORKSPACE MEMBERS</p><h3>Miembros activos</h3></div><span className="cc-role-note">Tu rol: {user.role}</span></div><div className="cc-team-list">{members.map((member) => <div className="cc-team-row" key={member.id}><div className="cc-avatar">{member.name.charAt(0).toUpperCase()}</div><div className="cc-row-copy"><strong>{member.name}{member.id === user.id && <small> · vos</small>}</strong><span>{member.email}</span></div>{canManage && member.role !== "owner" ? <select className="cc-role-select" value={member.role} onChange={(event) => void changeRole(member, event.target.value as Role)}><option value="admin" disabled={user.role !== "owner"}>admin</option><option value="operator">operator</option><option value="viewer">viewer</option></select> : <span className={`cc-role-pill role-${member.role}`}>{member.role}</span>}<span className={`cc-member-status ${member.status !== "active" ? "is-disabled" : ""}`}>{member.status === "active" ? "activo" : "pausado"}</span></div>)}</div></section><section className="cc-card"><div className="cc-card-heading"><div><p className="cc-eyebrow">INVITATIONS</p><h3>Sumar una persona</h3></div></div>{canManage ? <><label className="cc-form-label">Email <span>opcional si compartís el código</span><input className="cc-filter-input cc-input-wide" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="equipo@agencia.com" /></label><label className="cc-form-label">Permiso<select className="cc-filter-select cc-input-wide" value={role} onChange={(event) => setRole(event.target.value as Exclude<Role, "owner">)}><option value="operator">operator · puede operar dispositivos</option><option value="viewer">viewer · solo lectura</option><option value="admin" disabled={user.role !== "owner"}>admin · gestiona el equipo</option></select></label><button className="cc-button cc-button-primary cc-button-wide" onClick={() => void createInvite()} disabled={busy}>{busy ? "Creando…" : "Generar invitación"}<span>→</span></button>{invite && <div className="cc-invite-result"><span>Código listo · vence {fullDate(invite.expires_at)}</span><code>{invite.token}</code><button className="cc-button cc-button-ghost cc-button-wide" onClick={() => void navigator.clipboard?.writeText(invite.token || "")}>Copiar código</button></div>}{message && <p className="cc-inline-message is-error">{message}</p>}</> : <EmptyState title="Vista de solo lectura" detail="Pedile al owner que te otorgue permisos de administración." />}</section></div></div>;
 }
 
-function SettingsPage({ user, onLogout }: { user: User; onLogout: () => void }) {
-  return <div className="cc-page-stack"><section className="cc-section-intro"><div><p className="cc-eyebrow cc-eyebrow-accent">WORKSPACE SETTINGS</p><h2>Configuración del centro.</h2><p>Datos de tu cuenta y del workspace actual.</p></div></section><section className="cc-card cc-settings-card"><div className="cc-settings-profile"><div className="cc-avatar cc-avatar-large">{user.name.charAt(0).toUpperCase()}</div><div><h3>{user.name}</h3><p>{user.email}</p><span className={`cc-role-pill role-${user.role}`}>{user.role}</span></div></div><div className="cc-settings-grid"><div><span>Workspace</span><strong>{user.workspace.name}</strong></div><div><span>Workspace ID</span><strong>#{user.workspace.id}</strong></div><div><span>Permiso actual</span><strong>{user.role}</strong></div><div><span>API</span><strong className="cc-api-value"><span className="cc-online-dot" /> Conectada</strong></div></div><button className="cc-button cc-button-danger" onClick={onLogout}>Cerrar sesión</button></section></div>;
+function SettingsPage({ user, health, onLogout }: { user: User; health: ApiHealth; onLogout: () => void }) {
+  return <div className="cc-page-stack"><section className="cc-section-intro"><div><p className="cc-eyebrow cc-eyebrow-accent">WORKSPACE SETTINGS</p><h2>Configuración del centro.</h2><p>Datos de tu cuenta y del workspace actual.</p></div></section><section className="cc-card cc-settings-card"><div className="cc-settings-profile"><div className="cc-avatar cc-avatar-large">{user.name.charAt(0).toUpperCase()}</div><div><h3>{user.name}</h3><p>{user.email}</p><span className={`cc-role-pill role-${user.role}`}>{user.role}</span></div></div><div className="cc-settings-grid"><div><span>Workspace</span><strong>{user.workspace.name}</strong></div><div><span>Workspace ID</span><strong>#{user.workspace.id}</strong></div><div><span>Permiso actual</span><strong>{user.role}</strong></div><div><span>Ruta pública</span><strong className={`cc-api-value cc-health-text-${health.state}`}><span className="cc-health-dot" /> {healthLabel(health)}</strong></div></div><button className="cc-button cc-button-danger" onClick={onLogout}>Cerrar sesión</button></section></div>;
 }
 
 export default function Home() {
@@ -637,6 +735,7 @@ export default function Home() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [lastUpdated, setLastUpdated] = useState("");
+  const [apiHealth, setApiHealth] = useState<ApiHealth>(INITIAL_API_HEALTH);
   const [ready, setReady] = useState(false);
 
   const logout = useCallback(() => {
@@ -705,11 +804,25 @@ export default function Home() {
     return () => window.clearInterval(interval);
   }, [token, refresh]);
 
+  useEffect(() => {
+    let active = true;
+    const poll = async () => {
+      const nextHealth = await checkApiHealth();
+      if (active) setApiHealth(nextHealth);
+    };
+    void poll();
+    const interval = window.setInterval(() => void poll(), 15000);
+    return () => {
+      active = false;
+      window.clearInterval(interval);
+    };
+  }, []);
+
   if (!ready) return <div className="cc-loading-screen"><div className="cc-brand-mark">SF</div></div>;
   if (!token || !user) return <AuthPage onAuth={handleAuth} />;
 
   const pageContent = page === "overview"
-    ? <DashboardPage devices={devices} accounts={accounts} runs={runs} sessions={sessions} scans={scans} stats={stats} onNavigate={setPage} />
+    ? <DashboardPage devices={devices} accounts={accounts} runs={runs} sessions={sessions} scans={scans} stats={stats} health={apiHealth} onNavigate={setPage} />
     : page === "fleet"
       ? <FleetPage devices={devices} accounts={accounts} runs={runs} token={token} onChanged={() => void refresh(token)} canManageDevices={user.role === "owner" || user.role === "admin"} canRunTasks={user.role !== "viewer"} />
       : page === "accounts"
@@ -718,7 +831,7 @@ export default function Home() {
           ? <HistoryPage sessions={sessions} scans={scans} />
           : page === "team"
             ? <TeamPage user={user} token={token} members={members} onChanged={() => void refresh(token)} />
-            : <SettingsPage user={user} onLogout={logout} />;
+             : <SettingsPage user={user} health={apiHealth} onLogout={logout} />;
 
-  return <div className="cc-app-shell"><Sidebar page={page} user={user} onNavigate={setPage} onLogout={logout} /><div className="cc-main"><Topbar page={page} user={user} lastUpdated={lastUpdated} busy={busy} onRefresh={() => void refresh(token)} /><main className="cc-content">{error && <div className="cc-alert cc-alert-error cc-global-alert">{error}<button onClick={() => setError("")}>×</button></div>}{pageContent}</main></div><MobileNav page={page} onNavigate={setPage} /></div>;
+  return <div className="cc-app-shell"><Sidebar page={page} user={user} health={apiHealth} onNavigate={setPage} onLogout={logout} /><div className="cc-main"><Topbar page={page} user={user} health={apiHealth} lastUpdated={lastUpdated} busy={busy} onRefresh={() => void refresh(token)} /><main className="cc-content">{apiHealth.state !== "online" && apiHealth.state !== "checking" && <div className={`cc-alert cc-alert-health cc-alert-health-${apiHealth.state}`}><span><strong>{healthLabel(apiHealth)}</strong> · {healthDetail(apiHealth)}</span></div>}{error && <div className="cc-alert cc-alert-error cc-global-alert">{error}<button onClick={() => setError("")}>×</button></div>}{pageContent}</main></div><MobileNav page={page} onNavigate={setPage} /></div>;
 }
