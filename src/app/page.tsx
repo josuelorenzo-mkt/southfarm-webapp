@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import QRCode from "qrcode";
 import { SchedulerPanel } from "./scheduler-panel";
+import { AuthApiError, authRequest, clearSession, persistSession } from "./auth-client";
 
 const API = (process.env.NEXT_PUBLIC_API_URL || "https://api.southfarm.tech").replace(/\/$/, "");
 
@@ -178,23 +179,8 @@ const PAGES: Array<{ id: Page; label: string; glyph: string }> = [
   { id: "settings", label: "Settings", glyph: "⚙" },
 ];
 
-class ApiError extends Error {
-  status: number;
-
-  constructor(message: string, status: number) {
-    super(message);
-    this.status = status;
-  }
-}
-
 async function request<T>(path: string, token?: string, init: RequestInit = {}): Promise<T> {
-  const headers = new Headers(init.headers);
-  if (init.body && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
-  if (token) headers.set("Authorization", `Bearer ${token}`);
-  const response = await fetch(`${API}${path}`, { ...init, headers });
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new ApiError(data.error || "No se pudo completar la solicitud", response.status);
-  return data as T;
+  return authRequest<T>(API, path, token, init);
 }
 
 async function checkApiHealth(): Promise<ApiHealth> {
@@ -361,7 +347,7 @@ function PlatformBadge({ platform }: { platform: Platform }) {
   return <span className="cc-platform" style={{ color: item.color, borderColor: `${item.color}44`, background: `${item.color}12` }}>{item.short} · {item.label}</span>;
 }
 
-function AuthPage({ onAuth }: { onAuth: (token: string, user: User) => void }) {
+function AuthPage({ onAuth }: { onAuth: (session: { token: string; refresh_token?: string; user: User }) => void }) {
   const [login, setLogin] = useState(true);
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
@@ -377,11 +363,11 @@ function AuthPage({ onAuth }: { onAuth: (token: string, user: User) => void }) {
       const payload = login
         ? { email, password }
         : { email, password, name, ...(inviteToken.trim() ? { invite_token: inviteToken.trim() } : {}) };
-      const result = await request<{ token: string; user: User }>(login ? "/api/auth/login" : "/api/auth/register", undefined, {
+      const result = await request<{ token: string; refresh_token?: string; user: User }>(login ? "/api/auth/login" : "/api/auth/register", undefined, {
         method: "POST",
         body: JSON.stringify(payload),
       });
-      onAuth(result.token, result.user);
+      onAuth(result);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "No se pudo iniciar sesión");
     } finally {
@@ -739,8 +725,15 @@ export default function Home() {
   const [ready, setReady] = useState(false);
 
   const logout = useCallback(() => {
-    window.localStorage.removeItem("southfarm_token");
-    window.localStorage.removeItem("southfarm_user");
+    const refreshToken = window.localStorage.getItem("southfarm_refresh_token");
+    if (refreshToken) {
+      void fetch(`${API}/api/auth/logout`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ refresh_token: refreshToken }),
+      });
+    }
+    clearSession();
     setToken(null); setUser(null);
   }, []);
 
@@ -769,17 +762,16 @@ export default function Home() {
       window.localStorage.setItem("southfarm_user", JSON.stringify(nextUser));
       setLastUpdated(new Date().toISOString());
     } catch (cause) {
-      if (cause instanceof ApiError && [401, 403].includes(cause.status)) logout();
+      if (cause instanceof AuthApiError && [401, 403].includes(cause.status)) logout();
       else setError(cause instanceof Error ? cause.message : "No se pudieron cargar los datos");
     } finally {
       setBusy(false);
     }
   }, [logout]);
 
-  const handleAuth = useCallback((nextToken: string, nextUser: User) => {
-    window.localStorage.setItem("southfarm_token", nextToken);
-    window.localStorage.setItem("southfarm_user", JSON.stringify(nextUser));
-    setToken(nextToken); setUser(nextUser); void refresh(nextToken);
+  const handleAuth = useCallback((session: { token: string; refresh_token?: string; user: User }) => {
+    persistSession(session);
+    setToken(session.token); setUser(session.user); void refresh(session.token);
   }, [refresh]);
 
   const restoreSession = useCallback(() => {

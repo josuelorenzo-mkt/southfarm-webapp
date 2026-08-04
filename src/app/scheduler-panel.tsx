@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { AuthApiError, authRequest } from "./auth-client";
 
 const SCHEDULER_API = (process.env.NEXT_PUBLIC_API_URL || "https://api.southfarm.tech").replace(/\/$/, "");
 const BUENOS_AIRES_TIMEZONE = "America/Argentina/Buenos_Aires";
@@ -113,28 +114,8 @@ interface SchedulerPanelProps {
   onChanged?: () => void;
 }
 
-class SchedulerApiError extends Error {
-  status: number;
-
-  constructor(message: string, status: number) {
-    super(message);
-    this.status = status;
-  }
-}
-
 async function schedulerRequest<T>(path: string, token: string, init: RequestInit = {}): Promise<T> {
-  const headers = new Headers(init.headers);
-  if (init.body && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
-  headers.set("Authorization", "Bearer " + token);
-  const response = await fetch(SCHEDULER_API + path, { ...init, headers });
-  const data: unknown = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    const message = data && typeof data === "object" && "error" in data
-      ? String((data as { error?: unknown }).error || "No se pudo completar la solicitud")
-      : "No se pudo completar la solicitud";
-    throw new SchedulerApiError(message, response.status);
-  }
-  return data as T;
+  return authRequest<T>(SCHEDULER_API, path, token, init);
 }
 
 function numberValue(value: unknown): number {
@@ -331,7 +312,7 @@ export function SchedulerPanel({ token, canManage, onChanged }: SchedulerPanelPr
       setUnreadCount(numberValue(notificationData.unread_count));
       setControl(controlData.control || null);
     } catch (cause) {
-      if (!(cause instanceof SchedulerApiError && [401, 403].includes(cause.status))) {
+      if (!(cause instanceof AuthApiError && [401, 403].includes(cause.status))) {
         setError(cause instanceof Error ? cause.message : "No se pudo cargar el planner");
       }
     } finally {
