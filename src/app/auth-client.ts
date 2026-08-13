@@ -33,7 +33,11 @@ function isSessionControlPath(path: string): boolean {
   return /\/api\/auth\/(login|register|refresh|logout)$/.test(path);
 }
 
-async function refreshStoredAccessToken(apiBase: string): Promise<string | null> {
+export function getActiveAccessToken(fallbackToken?: string): string | null {
+  return window.localStorage.getItem('southfarm_token') || fallbackToken || null;
+}
+
+export async function refreshStoredAccessToken(apiBase: string): Promise<string | null> {
   if (refreshInFlight) return refreshInFlight;
 
   const refreshToken = window.localStorage.getItem('southfarm_refresh_token');
@@ -77,8 +81,7 @@ export async function authRequest<T>(
 ): Promise<T> {
   const headers = new Headers(init.headers);
   if (init.body && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
-  const storedToken = window.localStorage.getItem('southfarm_token');
-  const activeToken = storedToken || token;
+  const activeToken = getActiveAccessToken(token);
   if (activeToken) headers.set('Authorization', `Bearer ${activeToken}`);
 
   const response = await fetch(`${apiBase}${path}`, { ...init, headers });

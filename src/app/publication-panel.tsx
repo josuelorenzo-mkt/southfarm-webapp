@@ -1,7 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { authRequest } from "./auth-client";
+import { uploadPublication } from "./publication-upload";
 import type {
   PublicationAccount,
   PublicationApiError,
@@ -126,6 +127,7 @@ export function PublicationPanel({ token, devices, accounts, canManage }: Public
   const [selectedJob, setSelectedJob] = useState<PublicationJob | null>(null);
   const [rescheduleId, setRescheduleId] = useState<number | null>(null);
   const [actionBusy, setActionBusy] = useState<number | null>(null);
+  const uploadController = useRef<AbortController | null>(null);
 
   const selectedDevice = devices.find((device) => device.id === deviceId) || null;
   const matchingAccounts = useMemo(() => accountsForSelection(accounts, deviceId, platform), [accounts, deviceId, platform]);
@@ -154,6 +156,10 @@ export function PublicationPanel({ token, devices, accounts, canManage }: Public
     return () => window.clearInterval(timer);
   }, [jobs, loadJobs]);
   useEffect(() => () => { if (previewUrl) URL.revokeObjectURL(previewUrl); }, [previewUrl]);
+  useEffect(() => () => {
+    uploadController.current?.abort();
+    uploadController.current = null;
+  }, []);
   useEffect(() => {
     if (!selectedJob) return;
     const closeOnEscape = (event: KeyboardEvent) => { if (event.key === "Escape") setSelectedJob(null); };
@@ -196,7 +202,7 @@ export function PublicationPanel({ token, devices, accounts, canManage }: Public
 
   const formReady = canManage && Boolean(file && deviceId && accountId && !captionError && !fileError && !submitting);
 
-  function submit() {
+  async function submit() {
     if (!formReady || !file || !deviceId || !accountId) return;
     const schedule = scheduledFor();
     if (!schedule) return;
@@ -205,22 +211,28 @@ export function PublicationPanel({ token, devices, accounts, canManage }: Public
     body.set("video", file); body.set("platform", platform); body.set("device_id", String(deviceId));
     body.set("social_account_id", String(accountId)); body.set("caption", caption.trim().replace(/\s+/g, " "));
     body.set("scheduled_for", schedule);
-    const xhr = new XMLHttpRequest();
-    xhr.open("POST", `${API}/api/publications`);
-    xhr.setRequestHeader("Authorization", `Bearer ${token}`);
-    xhr.upload.onprogress = (event) => { if (event.lengthComputable) setUploadProgress(Math.round(event.loaded / event.total * 100)); };
-    xhr.onerror = () => { setError("La conexión se interrumpió durante la carga. Tus campos se conservaron."); setSubmitting(false); };
-    xhr.onload = () => {
-      let payload: PublicationResponse | PublicationApiError = {};
-      try { payload = JSON.parse(xhr.responseText) as PublicationResponse | PublicationApiError; } catch {}
-      if (xhr.status >= 200 && xhr.status < 300 && "publication" in payload) {
-        setNotice(`Publicación #${payload.publication.id} creada y en cola.`);
-        setJobs((current) => [payload.publication, ...current.filter((job) => job.id !== payload.publication.id)]);
-        setTab("queued"); setFile(null); setPreviewUrl(""); setCaption(""); setUploadProgress(100);
-      } else setError(apiError(payload));
-      setSubmitting(false);
-    };
-    xhr.send(body);
+    const controller = new AbortController();
+    uploadController.current = controller;
+    try {
+      const payload = await uploadPublication({
+        apiBase: API,
+        token,
+        body,
+        signal: controller.signal,
+        onProgress: setUploadProgress,
+      });
+      if (controller.signal.aborted) return;
+      setNotice(`Publicación #${payload.publication.id} creada y en cola.`);
+      setJobs((current) => [payload.publication, ...current.filter((job) => job.id !== payload.publication.id)]);
+      setTab("queued"); setFile(null); setPreviewUrl(""); setCaption(""); setUploadProgress(100);
+    } catch (cause) {
+      if (!controller.signal.aborted) setError(apiError(cause));
+    } finally {
+      if (uploadController.current === controller) {
+        uploadController.current = null;
+        if (!controller.signal.aborted) setSubmitting(false);
+      }
+    }
   }
 
   async function openDetail(id: number) {
@@ -293,7 +305,7 @@ export function PublicationPanel({ token, devices, accounts, canManage }: Public
 
           <div className="publication-summary"><div><span>Destino</span><strong>{selectedDevice ? selectedDevice.display_name || selectedDevice.alias || selectedDevice.device_name || selectedDevice.device_id : "Sin teléfono"}</strong><small>{matchingAccounts.find((account) => account.id === accountId)?.username ? `@${matchingAccounts.find((account) => account.id === accountId)?.username}` : "Sin cuenta"}</small></div><div><span>Acción</span><strong>{scheduleMode === "now" ? "Publicar ahora" : "Programar"}</strong><small>{scheduleMode === "schedule" ? `${scheduleDate} · ${scheduleTime} ART` : "Se encolará inmediatamente"}</small></div></div>
           {submitting && <div className="publication-upload" role="status" aria-live="polite"><div><span>Cargando video</span><strong>{uploadProgress}%</strong></div><progress max="100" value={uploadProgress}>{uploadProgress}%</progress></div>}
-          <button type="button" className="cc-button cc-button-primary cc-button-wide publication-submit" disabled={!formReady} onClick={submit}>{submitting ? "Cargando…" : scheduleMode === "now" ? "Publicar ahora" : "Programar publicación"}<span>→</span></button>
+          <button type="button" className="cc-button cc-button-primary cc-button-wide publication-submit" disabled={!formReady} onClick={() => void submit()}>{submitting ? "Cargando…" : scheduleMode === "now" ? "Publicar ahora" : "Programar publicación"}<span>→</span></button>
         </section>
 
         <section className="cc-card publication-queue" aria-labelledby="publication-queue-title">
