@@ -5,6 +5,7 @@ import type { ReactNode } from "react";
 import QRCode from "qrcode";
 import { SchedulerPanel } from "./scheduler-panel";
 import { AuthApiError, authRequest, clearSession, persistSession } from "./auth-client";
+import { PublicationPanel } from "./publication-panel";
 
 const API = (process.env.NEXT_PUBLIC_API_URL || "https://api.southfarm.tech").replace(/\/$/, "");
 
@@ -26,7 +27,7 @@ const INITIAL_API_HEALTH: ApiHealth = { state: "checking", checkedAt: null };
 
 type Role = "owner" | "admin" | "operator" | "viewer";
 type Platform = "instagram" | "tiktok" | "youtube";
-type Page = "overview" | "fleet" | "accounts" | "history" | "team" | "settings";
+type Page = "overview" | "publish" | "fleet" | "accounts" | "history" | "team" | "settings";
 type TaskMode = "warmup" | "scan";
 
 interface User {
@@ -172,6 +173,7 @@ const PLATFORMS: Array<{ id: Platform; label: string; short: string; color: stri
 
 const PAGES: Array<{ id: Page; label: string; glyph: string }> = [
   { id: "overview", label: "Command center", glyph: "⌂" },
+  { id: "publish", label: "Crear publicación", glyph: "＋" },
   { id: "fleet", label: "Device fleet", glyph: "▣" },
   { id: "accounts", label: "Warmup planner", glyph: "◎" },
   { id: "history", label: "Activity history", glyph: "◷" },
@@ -815,6 +817,8 @@ export default function Home() {
 
   const pageContent = page === "overview"
     ? <DashboardPage devices={devices} accounts={accounts} runs={runs} sessions={sessions} scans={scans} stats={stats} health={apiHealth} onNavigate={setPage} />
+    : page === "publish"
+      ? <PublicationPanel token={token} devices={devices} accounts={accounts} canManage={user.role !== "viewer"} />
     : page === "fleet"
       ? <FleetPage devices={devices} accounts={accounts} runs={runs} token={token} onChanged={() => void refresh(token)} canManageDevices={user.role === "owner" || user.role === "admin"} canRunTasks={user.role !== "viewer"} />
       : page === "accounts"
