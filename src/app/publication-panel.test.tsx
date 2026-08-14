@@ -66,6 +66,33 @@ describe("PublicationPanel", () => {
     expect((screen.getByLabelText("Cuenta exacta") as HTMLSelectElement).value).toBe("1");
   });
 
+  it("keeps the open detail timeline when a queue refresh returns a job without events", async () => {
+    const job = {
+      id: 43, workspace_id: 1, device_id: 7, social_account_id: 1, platform: "instagram" as const,
+      caption: "caption breve", word_count: 2, scheduled_for: "2026-08-13T12:00:00.000Z",
+      status: "queued" as const, current_step: "queued", progress_percent: 0, attempt_count: 0,
+      final_action_at: null, published_at: null, verified_at: null, remote_post_identity: null,
+      error_code: null, error_message: null, cancel_requested_at: null,
+      created_at: "2026-08-13T12:00:00.000Z", updated_at: "2026-08-13T12:00:00.000Z", completed_at: null,
+    };
+    authRequestMock
+      .mockResolvedValueOnce({ publications: [job] })
+      .mockResolvedValueOnce({ publication: { ...job, events: [{
+        id: 9, from_status: null, to_status: "queued", current_step: "queued", message: "Trabajo creado",
+        actor_type: "system", created_at: "2026-08-13T12:00:00.000Z", payload: null,
+      }] } })
+      .mockResolvedValueOnce({ publications: [job] });
+
+    render(<PublicationPanel token="token" devices={devices} accounts={accounts} canManage />);
+    fireEvent.click(await screen.findByRole("button", { name: "Ver detalle" }));
+    expect(await screen.findByText("Trabajo creado")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: /Actualizar/ }));
+
+    await waitFor(() => expect(authRequestMock).toHaveBeenCalledTimes(3));
+    expect(screen.getByText("Trabajo creado")).toBeTruthy();
+  });
+
   it("aborts an active upload when the panel unmounts", async () => {
     let uploadSignal: AbortSignal | undefined;
     uploadPublicationMock.mockImplementation(({ signal }: { signal?: AbortSignal }) => {

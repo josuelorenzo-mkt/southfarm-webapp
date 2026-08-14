@@ -141,7 +141,11 @@ export function PublicationPanel({ token, devices, accounts, canManage }: Public
       const response = await authRequest<PublicationsResponse>(API, "/api/publications", token);
       const publications = response.publications || [];
       setJobs(publications);
-      setSelectedJob((current) => current ? publications.find((job) => job.id === current.id) || current : current);
+      setSelectedJob((current) => {
+        if (!current) return current;
+        const refreshed = publications.find((job) => job.id === current.id);
+        return refreshed ? { ...refreshed, events: refreshed.events ?? current.events } : current;
+      });
       if (publications.some((job) => job.error_code === "ACCOUNT_UNAVAILABLE")) {
         setError(ERROR_MESSAGES.ACCOUNT_UNAVAILABLE);
       }
