@@ -47,6 +47,7 @@ const STATUS_LABELS: Record<PublicationStatus, string> = {
 };
 
 const ERROR_MESSAGES: Record<string, string> = {
+  ACCOUNT_UNAVAILABLE: "La cuenta seleccionada ya no está disponible en este teléfono. Volvé a escanear sus cuentas o elegí otra cuenta disponible.",
   REVIEW_REQUIRED: "Esta cuenta tiene una publicación incierta. Revisala antes de crear otra.",
   VIDEO_TOO_LARGE: "El video supera el límite de 200 MiB.",
   MEDIA_METADATA_INVALID: "No pudimos verificar duración, resolución o códecs del video.",
@@ -138,7 +139,12 @@ export function PublicationPanel({ token, devices, accounts, canManage }: Public
     if (!quiet) setLoadingJobs(true);
     try {
       const response = await authRequest<PublicationsResponse>(API, "/api/publications", token);
-      setJobs(response.publications || []);
+      const publications = response.publications || [];
+      setJobs(publications);
+      setSelectedJob((current) => current ? publications.find((job) => job.id === current.id) || current : current);
+      if (publications.some((job) => job.error_code === "ACCOUNT_UNAVAILABLE")) {
+        setError(ERROR_MESSAGES.ACCOUNT_UNAVAILABLE);
+      }
     } catch (cause) {
       if (!quiet) setError(apiError(cause));
     } finally {

@@ -3,11 +3,13 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PublicationPanel } from "./publication-panel";
 
-const { uploadPublicationMock } = vi.hoisted(() => ({ uploadPublicationMock: vi.fn() }));
-vi.mock("./auth-client", () => ({ authRequest: vi.fn(async () => ({ publications: [] })) }));
+const { authRequestMock, uploadPublicationMock } = vi.hoisted(() => ({ authRequestMock: vi.fn(), uploadPublicationMock: vi.fn() }));
+vi.mock("./auth-client", () => ({ authRequest: authRequestMock }));
 vi.mock("./publication-upload", () => ({ uploadPublication: uploadPublicationMock }));
 afterEach(() => cleanup());
 beforeEach(() => {
+  authRequestMock.mockReset();
+  authRequestMock.mockResolvedValue({ publications: [] });
   uploadPublicationMock.mockReset();
   Object.defineProperty(URL, "createObjectURL", { configurable: true, value: vi.fn(() => "blob:preview") });
   Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: vi.fn() });
@@ -39,6 +41,29 @@ describe("PublicationPanel", () => {
     render(<PublicationPanel token="token" devices={devices} accounts={accounts} canManage={false} />);
     expect(screen.getByText(/solo lectura/i)).toBeTruthy();
     expect(screen.getByRole("button", { name: /Publicar ahora/ })).toHaveProperty("disabled", true);
+  });
+
+  it("shows actionable recovery when the queue receives an unavailable account failure", async () => {
+    authRequestMock.mockResolvedValue({
+      publications: [{
+        id: 42, workspace_id: 1, device_id: 7, social_account_id: 1, platform: "instagram",
+        caption: "caption breve", word_count: 2, scheduled_for: "2026-08-13T12:00:00.000Z",
+        status: "failed", current_step: "selecting_account", progress_percent: 20, attempt_count: 1,
+        final_action_at: null, published_at: null, verified_at: null, remote_post_identity: null,
+        error_code: "ACCOUNT_UNAVAILABLE", error_message: "Account unavailable", cancel_requested_at: null,
+        created_at: "2026-08-13T12:00:00.000Z", updated_at: "2026-08-13T12:00:00.000Z", completed_at: null,
+      }],
+    });
+
+    render(<PublicationPanel token="token" devices={devices} accounts={accounts} canManage />);
+    fireEvent.change(screen.getByLabelText("Teléfono"), { target: { value: "7" } });
+    fireEvent.change(screen.getByLabelText("Cuenta exacta"), { target: { value: "1" } });
+
+    expect((await screen.findByRole("alert")).textContent).toBe(
+      "La cuenta seleccionada ya no está disponible en este teléfono. Volvé a escanear sus cuentas o elegí otra cuenta disponible.",
+    );
+    expect((screen.getByLabelText("Teléfono") as HTMLSelectElement).value).toBe("7");
+    expect((screen.getByLabelText("Cuenta exacta") as HTMLSelectElement).value).toBe("1");
   });
 
   it("aborts an active upload when the panel unmounts", async () => {
