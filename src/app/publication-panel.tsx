@@ -91,13 +91,14 @@ function bytes(value: number): string {
 
 const MAX_EVIDENCE_CHARS = 500;
 
-/** Evidencia del worker (`result`) renderizada como texto plano, truncable. */
+/** Evidencia del worker (`result`) renderizada como texto plano, truncable. Null cuando no hay evidencia. */
 function evidenceText(value: unknown): string | null {
   if (value === null || value === undefined) return null;
-  if (typeof value === "string") return value;
+  if (typeof value === "string") return value.trim() ? value : null;
   if (typeof value === "number" || typeof value === "boolean") return String(value);
   try {
-    return JSON.stringify(value, null, 2);
+    const text = JSON.stringify(value, null, 2);
+    return text && text !== "{}" && text !== "[]" ? text : null;
   } catch {
     return String(value);
   }
@@ -149,6 +150,7 @@ export function PublicationPanel({ token, devices, accounts, canManage }: Public
   const [rescheduleId, setRescheduleId] = useState<number | null>(null);
   const [actionBusy, setActionBusy] = useState<number | null>(null);
   const [reviewPrompt, setReviewPrompt] = useState<{ job: PublicationJob; action: "confirm" | "dismiss" } | null>(null);
+  const [reviewNote, setReviewNote] = useState("");
   const [evidenceExpanded, setEvidenceExpanded] = useState<number | null>(null);
   const uploadController = useRef<AbortController | null>(null);
 
@@ -295,8 +297,9 @@ export function PublicationPanel({ token, devices, accounts, canManage }: Public
 
   async function resolveReview(job: PublicationJob, action: "confirm" | "dismiss") {
     setActionBusy(job.id); setError(""); setNotice("");
+    const note = reviewNote.trim();
     try {
-      await resolvePublicationReview({ apiBase: API, token, id: job.id, action });
+      await resolvePublicationReview({ apiBase: API, token, id: job.id, action, ...(note ? { note } : {}) });
       setNotice(action === "confirm"
         ? `Publicación #${job.id} confirmada y marcada como completada.`
         : `Publicación #${job.id} marcada como fallida.`);
@@ -376,7 +379,7 @@ export function PublicationPanel({ token, devices, accounts, canManage }: Public
 
       {selectedJob && <div className="publication-detail-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setSelectedJob(null); }}><section className="publication-detail" role="dialog" aria-modal="true" aria-labelledby="publication-detail-title"><div className="publication-detail-head"><div><p className="cc-eyebrow">PUBLICACIÓN #{selectedJob.id}</p><h3 id="publication-detail-title">{STATUS_LABELS[selectedJob.status]}</h3></div><button autoFocus type="button" className="cc-icon-button" aria-label="Cerrar detalle" onClick={() => setSelectedJob(null)}>×</button></div><div className="publication-detail-facts"><div><span>Cuenta</span><strong>@{accounts.find((account) => account.id === selectedJob.social_account_id)?.username || selectedJob.social_account_id}</strong></div><div><span>Programada</span><strong>{dateTime(selectedJob.scheduled_for)}</strong></div><div><span>Progreso</span><strong>{selectedJob.progress_percent}%</strong></div><div><span>Intentos</span><strong>{selectedJob.attempt_count}</strong></div></div>{selectedJob.error_code && <div className="cc-alert cc-alert-error"><strong>{selectedJob.error_code}</strong><br />{ERROR_MESSAGES[selectedJob.error_code] || selectedJob.error_message || "Requiere intervención del operador."}</div>}<div className="publication-timeline"><h4>Timeline observable</h4>{selectedJob.events?.length ? selectedJob.events.map((event) => <div key={event.id}><span className="publication-timeline-dot" /><div><strong>{event.to_status ? STATUS_LABELS[event.to_status] : event.current_step || "Evento"}</strong><small>{dateTime(event.created_at)} · {event.actor_type || "sistema"}</small>{event.message && <p>{event.message}</p>}</div></div>) : <p>El backend todavía no registró eventos adicionales.</p>}</div></section></div>}
 
-      {reviewPrompt && <div className="publication-review-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setReviewPrompt(null); }}><section className="publication-review-dialog" role="dialog" aria-modal="true" aria-labelledby="publication-review-title"><div className="publication-review-dialog-head"><div><p className="cc-eyebrow">PUBLICACIÓN #{reviewPrompt.job.id} · REQUIERE REVISIÓN</p><h3 id="publication-review-title">{reviewPrompt.action === "confirm" ? "¿Confirmar publicación?" : "¿Marcar como fallida?"}</h3></div><button type="button" className="cc-icon-button" aria-label="Cancelar resolución" onClick={() => setReviewPrompt(null)}>×</button></div>{reviewPrompt.action === "dismiss" ? <p className="publication-review-warning">La publicación pudo haber salido de verdad. Marcarla como fallida la cierra como no publicada y <strong>no se puede deshacer</strong>.</p> : <p className="publication-review-hint">Confirmás que la publicación salió correctamente y la marcás como completada. Esta acción <strong>no se puede deshacer</strong>.</p>}<div className="publication-review-dialog-actions"><button type="button" className="cc-button cc-button-ghost" disabled={actionBusy === reviewPrompt.job.id} onClick={() => setReviewPrompt(null)}>Cancelar</button><button type="button" className={reviewPrompt.action === "dismiss" ? "cc-button cc-button-danger" : "cc-button cc-button-primary"} disabled={actionBusy === reviewPrompt.job.id} onClick={() => void resolveReview(reviewPrompt.job, reviewPrompt.action)}>{actionBusy === reviewPrompt.job.id ? "Resolviendo…" : reviewPrompt.action === "confirm" ? "Sí, confirmar" : "Sí, marcar como fallida"}</button></div></section></div>}
+      {reviewPrompt && <div className="publication-review-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setReviewPrompt(null); }}><section className="publication-review-dialog" role="dialog" aria-modal="true" aria-labelledby="publication-review-title"><div className="publication-review-dialog-head"><div><p className="cc-eyebrow">PUBLICACIÓN #{reviewPrompt.job.id} · REQUIERE REVISIÓN</p><h3 id="publication-review-title">{reviewPrompt.action === "confirm" ? "¿Confirmar publicación?" : "¿Marcar como fallida?"}</h3></div><button type="button" className="cc-icon-button" aria-label="Cancelar resolución" onClick={() => setReviewPrompt(null)}>×</button></div>{reviewPrompt.action === "dismiss" ? <p className="publication-review-warning">La publicación pudo haber salido de verdad. Marcarla como fallida la cierra como no publicada y <strong>no se puede deshacer</strong>.</p> : <p className="publication-review-hint">Confirmás que la publicación salió correctamente y la marcás como completada. Esta acción <strong>no se puede deshacer</strong>.</p>}{reviewPrompt.action === "dismiss" && <label className="publication-review-note" htmlFor="publication-review-note">Motivo del descarte (opcional)<textarea id="publication-review-note" rows={3} maxLength={200} value={reviewNote} placeholder="Motivo del descarte (opcional)" onChange={(event) => setReviewNote(event.target.value)} /><span>{reviewNote.length}/200</span></label>}<div className="publication-review-dialog-actions"><button type="button" className="cc-button cc-button-ghost" disabled={actionBusy === reviewPrompt.job.id} onClick={() => setReviewPrompt(null)}>Cancelar</button><button type="button" className={reviewPrompt.action === "dismiss" ? "cc-button cc-button-danger" : "cc-button cc-button-primary"} disabled={actionBusy === reviewPrompt.job.id} onClick={() => void resolveReview(reviewPrompt.job, reviewPrompt.action)}>{actionBusy === reviewPrompt.job.id ? "Resolviendo…" : reviewPrompt.action === "confirm" ? "Sí, confirmar" : "Sí, marcar como fallida"}</button></div></section></div>}
     </div>
   );
 }

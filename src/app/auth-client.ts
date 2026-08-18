@@ -6,10 +6,12 @@ export interface AuthSessionPayload {
 
 export class AuthApiError extends Error {
   status: number;
+  error_code?: string;
 
-  constructor(message: string, status: number) {
+  constructor(message: string, status: number, error_code?: string) {
     super(message);
     this.status = status;
+    if (error_code !== undefined) this.error_code = error_code;
   }
 }
 
@@ -91,11 +93,11 @@ export async function authRequest<T>(
     if (refreshedToken) return authRequest<T>(apiBase, path, refreshedToken, init, false);
   }
   if (!response.ok) {
+    const errorPayload = data && typeof data === 'object' ? data as Record<string, unknown> : {};
     throw new AuthApiError(
-      data && typeof data === 'object' && 'error' in data
-        ? String((data as { error?: unknown }).error || 'No se pudo completar la solicitud')
-        : 'No se pudo completar la solicitud',
+      typeof errorPayload.error === 'string' ? errorPayload.error : 'No se pudo completar la solicitud',
       response.status,
+      typeof errorPayload.error_code === 'string' ? errorPayload.error_code : undefined,
     );
   }
   return data as T;

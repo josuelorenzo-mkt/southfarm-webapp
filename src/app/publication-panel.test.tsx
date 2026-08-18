@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { AuthApiError } from "./auth-client";
 import { PublicationPanel } from "./publication-panel";
 
 const { authRequestMock, uploadPublicationMock, resolvePublicationReviewMock } = vi.hoisted(() => ({
@@ -8,7 +9,10 @@ const { authRequestMock, uploadPublicationMock, resolvePublicationReviewMock } =
   uploadPublicationMock: vi.fn(),
   resolvePublicationReviewMock: vi.fn(),
 }));
-vi.mock("./auth-client", () => ({ authRequest: authRequestMock }));
+vi.mock("./auth-client", async () => {
+  const actual = await vi.importActual<typeof import("./auth-client")>("./auth-client");
+  return { ...actual, authRequest: authRequestMock };
+});
 vi.mock("./publication-upload", () => ({ uploadPublication: uploadPublicationMock }));
 vi.mock("./publication-review", () => ({ resolvePublicationReview: resolvePublicationReviewMock }));
 afterEach(() => cleanup());
@@ -226,5 +230,83 @@ describe("PublicationPanel", () => {
     await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("No se pudo resolver la revisión"));
     expect(screen.queryByRole("heading", { name: "¿Confirmar publicación?" })).toBeNull();
     expect(screen.getByRole("button", { name: "Confirmar publicación" })).toBeTruthy();
+  });
+
+  it("dismisses a review with an optional note passed to the resolver", async () => {
+    const review = reviewJob(56);
+    const failed = reviewJob(56, { status: "failed" as const, current_step: "failed", error_code: "REVIEW_DISMISSED" });
+    authRequestMock
+      .mockResolvedValueOnce({ publications: [review] })
+      .mockResolvedValueOnce({ publications: [failed] });
+    resolvePublicationReviewMock.mockResolvedValue({ publication: failed });
+
+    render(<PublicationPanel token="token" devices={devices} accounts={accounts} canManage />);
+    await openReviewTab();
+
+    fireEvent.click(screen.getByRole("button", { name: "Marcar como fallida" }));
+    const note = await screen.findByLabelText(/Motivo del descarte/);
+    expect(note).toHaveProperty("maxLength", 200);
+    fireEvent.change(note, { target: { value: "  El video no se subió a la plataforma  " } });
+    fireEvent.click(screen.getByRole("button", { name: "Sí, marcar como fallida" }));
+
+    await waitFor(() => expect(resolvePublicationReviewMock).toHaveBeenCalledWith({
+      apiBase: expect.stringMatching(/^https?:\/\//), token: "token", id: 56, action: "dismiss",
+      note: "El video no se subió a la plataforma",
+    }));
+    await waitFor(() => expect(screen.getByText(/Publicación #56 marcada como fallida/)).toBeTruthy());
+  });
+
+  it("dismisses a review without a note and omits the note field", async () => {
+    const review = reviewJob(57);
+    const failed = reviewJob(57, { status: "failed" as const, current_step: "failed", error_code: "REVIEW_DISMISSED" });
+    authRequestMock
+      .mockResolvedValueOnce({ publications: [review] })
+      .mockResolvedValueOnce({ publications: [failed] });
+    resolvePublicationReviewMock.mockResolvedValue({ publication: failed });
+
+    render(<PublicationPanel token="token" devices={devices} accounts={accounts} canManage />);
+    await openReviewTab();
+
+    fireEvent.click(screen.getByRole("button", { name: "Marcar como fallida" }));
+    fireEvent.change(await screen.findByLabelText(/Motivo del descarte/), { target: { value: "   " } });
+    fireEvent.click(screen.getByRole("button", { name: "Sí, marcar como fallida" }));
+
+    await waitFor(() => expect(resolvePublicationReviewMock).toHaveBeenCalledWith({
+      apiBase: expect.stringMatching(/^https?:\/\//), token: "token", id: 57, action: "dismiss",
+    }));
+    await waitFor(() => expect(screen.getByText(/Publicación #57 marcada como fallida/)).toBeTruthy());
+  });
+
+  it("maps an UNSAFE_TRANSITION review error to its operator message", async () => {
+    authRequestMock.mockResolvedValue({ publications: [reviewJob(58)] });
+    resolvePublicationReviewMock.mockRejectedValue(
+      new AuthApiError("Conflict: the publication has already advanced", 409, "UNSAFE_TRANSITION"),
+    );
+
+    render(<PublicationPanel token="token" devices={devices} accounts={accounts} canManage />);
+    await openReviewTab();
+
+    fireEvent.click(screen.getByRole("button", { name: "Confirmar publicación" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Sí, confirmar" }));
+
+    expect((await screen.findByRole("alert")).textContent).toBe(
+      "La publicación avanzó y esta acción ya no es segura.",
+    );
+  });
+
+  it("hides the worker evidence when the review job has no result", async () => {
+    authRequestMock.mockResolvedValue({
+      publications: [
+        reviewJob(59),
+        reviewJob(60, { result: "" }),
+        reviewJob(61, { result: "Publish response: { media_id: 4321 }" }),
+      ],
+    });
+
+    render(<PublicationPanel token="token" devices={devices} accounts={accounts} canManage />);
+    await openReviewTab();
+
+    expect(screen.getAllByText("Evidencia del worker")).toHaveLength(1);
+    expect(screen.getByText("Publish response: { media_id: 4321 }")).toBeTruthy();
   });
 });

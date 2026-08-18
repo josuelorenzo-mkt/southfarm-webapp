@@ -24,7 +24,10 @@ function responseError(payload: PublicationResponse | PublicationApiError, statu
   const message = "error" in payload && typeof payload.error === "string"
     ? payload.error
     : "No se pudo completar la solicitud";
-  return new AuthApiError(message, status);
+  const errorCode = "error_code" in payload && typeof payload.error_code === "string"
+    ? payload.error_code
+    : undefined;
+  return new AuthApiError(message, status, errorCode);
 }
 
 function sendAttempt(
