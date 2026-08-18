@@ -68,6 +68,8 @@ export interface PublicationJob {
   created_at: string;
   updated_at: string;
   completed_at: string | null;
+  /** Evidencia adjuntada por el worker (dumps/texto) cuando el job quedó en review_required. */
+  result?: unknown;
   media?: PublicationMedia;
   events?: PublicationEvent[];
 }
