@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { authRequest } from "./auth-client";
+import { resolvePublicationReview } from "./publication-review";
 import { uploadPublication } from "./publication-upload";
 import type {
   PublicationAccount,
@@ -88,6 +89,25 @@ function bytes(value: number): string {
   return value >= 1024 * 1024 ? `${(value / 1024 / 1024).toFixed(1)} MiB` : `${Math.ceil(value / 1024)} KiB`;
 }
 
+const MAX_EVIDENCE_CHARS = 500;
+
+/** Evidencia del worker (`result`) renderizada como texto plano, truncable. */
+function evidenceText(value: unknown): string | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
+function truncateEvidence(text: string, max: number): string {
+  if (text.length <= max) return text;
+  return `${text.slice(0, max).trimEnd()}…`;
+}
+
 function defaultSchedule(): { date: string; time: string } {
   const formatter = new Intl.DateTimeFormat("en-CA", {
     timeZone: "America/Argentina/Buenos_Aires", year: "numeric", month: "2-digit", day: "2-digit",
@@ -128,6 +148,8 @@ export function PublicationPanel({ token, devices, accounts, canManage }: Public
   const [selectedJob, setSelectedJob] = useState<PublicationJob | null>(null);
   const [rescheduleId, setRescheduleId] = useState<number | null>(null);
   const [actionBusy, setActionBusy] = useState<number | null>(null);
+  const [reviewPrompt, setReviewPrompt] = useState<{ job: PublicationJob; action: "confirm" | "dismiss" } | null>(null);
+  const [evidenceExpanded, setEvidenceExpanded] = useState<number | null>(null);
   const uploadController = useRef<AbortController | null>(null);
 
   const selectedDevice = devices.find((device) => device.id === deviceId) || null;
@@ -176,6 +198,12 @@ export function PublicationPanel({ token, devices, accounts, canManage }: Public
     window.addEventListener("keydown", closeOnEscape);
     return () => window.removeEventListener("keydown", closeOnEscape);
   }, [selectedJob]);
+  useEffect(() => {
+    if (!reviewPrompt) return;
+    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === "Escape") setReviewPrompt(null); };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [reviewPrompt]);
 
   function choosePlatform(next: PublicationPlatform) {
     setPlatform(next);
@@ -265,6 +293,18 @@ export function PublicationPanel({ token, devices, accounts, canManage }: Public
     finally { setActionBusy(null); }
   }
 
+  async function resolveReview(job: PublicationJob, action: "confirm" | "dismiss") {
+    setActionBusy(job.id); setError(""); setNotice("");
+    try {
+      await resolvePublicationReview({ apiBase: API, token, id: job.id, action });
+      setNotice(action === "confirm"
+        ? `Publicación #${job.id} confirmada y marcada como completada.`
+        : `Publicación #${job.id} marcada como fallida.`);
+      await loadJobs(true);
+    } catch (cause) { setError(apiError(cause)); }
+    finally { setReviewPrompt(null); setActionBusy(null); }
+  }
+
   const visibleJobs = filterJobs(jobs, tab);
 
   return (
@@ -326,12 +366,17 @@ export function PublicationPanel({ token, devices, accounts, canManage }: Public
             const device = devices.find((item) => item.id === job.device_id);
             const canCancel = canManage && !job.final_action_at && !["completed", "cancelled", "failed", "review_required", "cancellation_requested"].includes(job.status);
             const canReschedule = canManage && job.status === "queued";
-            return <article key={job.id} className={`publication-job status-${job.status}`}><button type="button" className="publication-job-main" onClick={() => void openDetail(job.id)} disabled={actionBusy === job.id}><span className="publication-job-platform">{PLATFORM_OPTIONS.find((item) => item.id === job.platform)?.short}</span><span className="publication-job-copy"><strong>@{account?.username || `cuenta ${job.social_account_id}`}</strong><small>{device?.display_name || device?.alias || device?.device_name || device?.device_id || `teléfono ${job.device_id}`} · {dateTime(job.scheduled_for)}</small></span><span className="publication-job-status"><strong>{STATUS_LABELS[job.status]}</strong><small>{job.progress_percent}%</small></span></button>{PROGRESS_STATUSES.has(job.status) && <progress max="100" value={job.progress_percent}>{job.progress_percent}%</progress>}<div className="publication-job-actions">{canReschedule && <button type="button" className="cc-button cc-button-ghost" onClick={() => setRescheduleId(job.id)}>Reprogramar</button>}{canCancel && <button type="button" className="cc-button cc-button-danger" onClick={() => void mutateJob(job.id, `/api/publications/${job.id}/cancel`, { method: "POST" })}>Cancelar</button>}<button type="button" className="cc-button cc-button-ghost" onClick={() => void openDetail(job.id)}>Ver detalle</button></div>{rescheduleId === job.id && <div className="publication-reschedule"><label>Nueva fecha<input type="date" value={scheduleDate} onChange={(event) => setScheduleDate(event.target.value)} /></label><label>Nueva hora<input type="time" value={scheduleTime} onChange={(event) => setScheduleTime(event.target.value)} /></label><button type="button" className="cc-button cc-button-primary" onClick={() => { const iso = scheduledFor(true); if (iso) void mutateJob(job.id, `/api/publications/${job.id}/schedule`, { method: "PATCH", body: JSON.stringify({ scheduled_for: iso }) }); }}>Guardar</button></div>}</article>;
+            const needsReview = canManage && job.status === "review_required";
+            const evidence = needsReview ? evidenceText(job.result) : null;
+            const evidenceTruncated = evidence !== null && evidence.length > MAX_EVIDENCE_CHARS;
+            return <article key={job.id} className={`publication-job status-${job.status}`}><button type="button" className="publication-job-main" onClick={() => void openDetail(job.id)} disabled={actionBusy === job.id}><span className="publication-job-platform">{PLATFORM_OPTIONS.find((item) => item.id === job.platform)?.short}</span><span className="publication-job-copy"><strong>@{account?.username || `cuenta ${job.social_account_id}`}</strong><small>{device?.display_name || device?.alias || device?.device_name || device?.device_id || `teléfono ${job.device_id}`} · {dateTime(job.scheduled_for)}</small></span><span className="publication-job-status"><strong>{STATUS_LABELS[job.status]}</strong><small>{job.progress_percent}%</small></span></button>{PROGRESS_STATUSES.has(job.status) && <progress max="100" value={job.progress_percent}>{job.progress_percent}%</progress>}{evidence !== null && <div className="publication-review-evidence"><span className="publication-review-evidence-label">Evidencia del worker</span><pre>{truncateEvidence(evidence, evidenceExpanded === job.id ? evidence.length : MAX_EVIDENCE_CHARS)}</pre>{evidenceTruncated && <button type="button" className="publication-review-evidence-toggle" onClick={() => setEvidenceExpanded((current) => current === job.id ? null : job.id)}>{evidenceExpanded === job.id ? "Mostrar menos" : "Ver todo"}</button>}</div>}<div className="publication-job-actions">{needsReview && <button type="button" className="cc-button cc-button-primary" disabled={actionBusy === job.id} onClick={() => setReviewPrompt({ job, action: "confirm" })}>Confirmar publicación</button>}{needsReview && <button type="button" className="cc-button cc-button-danger" disabled={actionBusy === job.id} onClick={() => setReviewPrompt({ job, action: "dismiss" })}>Marcar como fallida</button>}{canReschedule && <button type="button" className="cc-button cc-button-ghost" onClick={() => setRescheduleId(job.id)}>Reprogramar</button>}{canCancel && <button type="button" className="cc-button cc-button-danger" onClick={() => void mutateJob(job.id, `/api/publications/${job.id}/cancel`, { method: "POST" })}>Cancelar</button>}<button type="button" className="cc-button cc-button-ghost" onClick={() => void openDetail(job.id)}>Ver detalle</button></div>{rescheduleId === job.id && <div className="publication-reschedule"><label>Nueva fecha<input type="date" value={scheduleDate} onChange={(event) => setScheduleDate(event.target.value)} /></label><label>Nueva hora<input type="time" value={scheduleTime} onChange={(event) => setScheduleTime(event.target.value)} /></label><button type="button" className="cc-button cc-button-primary" onClick={() => { const iso = scheduledFor(true); if (iso) void mutateJob(job.id, `/api/publications/${job.id}/schedule`, { method: "PATCH", body: JSON.stringify({ scheduled_for: iso }) }); }}>Guardar</button></div>}</article>;
           })}</div>}
         </section>
       </div>
 
       {selectedJob && <div className="publication-detail-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setSelectedJob(null); }}><section className="publication-detail" role="dialog" aria-modal="true" aria-labelledby="publication-detail-title"><div className="publication-detail-head"><div><p className="cc-eyebrow">PUBLICACIÓN #{selectedJob.id}</p><h3 id="publication-detail-title">{STATUS_LABELS[selectedJob.status]}</h3></div><button autoFocus type="button" className="cc-icon-button" aria-label="Cerrar detalle" onClick={() => setSelectedJob(null)}>×</button></div><div className="publication-detail-facts"><div><span>Cuenta</span><strong>@{accounts.find((account) => account.id === selectedJob.social_account_id)?.username || selectedJob.social_account_id}</strong></div><div><span>Programada</span><strong>{dateTime(selectedJob.scheduled_for)}</strong></div><div><span>Progreso</span><strong>{selectedJob.progress_percent}%</strong></div><div><span>Intentos</span><strong>{selectedJob.attempt_count}</strong></div></div>{selectedJob.error_code && <div className="cc-alert cc-alert-error"><strong>{selectedJob.error_code}</strong><br />{ERROR_MESSAGES[selectedJob.error_code] || selectedJob.error_message || "Requiere intervención del operador."}</div>}<div className="publication-timeline"><h4>Timeline observable</h4>{selectedJob.events?.length ? selectedJob.events.map((event) => <div key={event.id}><span className="publication-timeline-dot" /><div><strong>{event.to_status ? STATUS_LABELS[event.to_status] : event.current_step || "Evento"}</strong><small>{dateTime(event.created_at)} · {event.actor_type || "sistema"}</small>{event.message && <p>{event.message}</p>}</div></div>) : <p>El backend todavía no registró eventos adicionales.</p>}</div></section></div>}
+
+      {reviewPrompt && <div className="publication-review-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setReviewPrompt(null); }}><section className="publication-review-dialog" role="dialog" aria-modal="true" aria-labelledby="publication-review-title"><div className="publication-review-dialog-head"><div><p className="cc-eyebrow">PUBLICACIÓN #{reviewPrompt.job.id} · REQUIERE REVISIÓN</p><h3 id="publication-review-title">{reviewPrompt.action === "confirm" ? "¿Confirmar publicación?" : "¿Marcar como fallida?"}</h3></div><button type="button" className="cc-icon-button" aria-label="Cancelar resolución" onClick={() => setReviewPrompt(null)}>×</button></div>{reviewPrompt.action === "dismiss" ? <p className="publication-review-warning">La publicación pudo haber salido de verdad. Marcarla como fallida la cierra como no publicada y <strong>no se puede deshacer</strong>.</p> : <p className="publication-review-hint">Confirmás que la publicación salió correctamente y la marcás como completada. Esta acción <strong>no se puede deshacer</strong>.</p>}<div className="publication-review-dialog-actions"><button type="button" className="cc-button cc-button-ghost" disabled={actionBusy === reviewPrompt.job.id} onClick={() => setReviewPrompt(null)}>Cancelar</button><button type="button" className={reviewPrompt.action === "dismiss" ? "cc-button cc-button-danger" : "cc-button cc-button-primary"} disabled={actionBusy === reviewPrompt.job.id} onClick={() => void resolveReview(reviewPrompt.job, reviewPrompt.action)}>{actionBusy === reviewPrompt.job.id ? "Resolviendo…" : reviewPrompt.action === "confirm" ? "Sí, confirmar" : "Sí, marcar como fallida"}</button></div></section></div>}
     </div>
   );
 }
