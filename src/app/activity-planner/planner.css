@@ -4,14 +4,6 @@
    por eso los estilos se escopean bajo .ap-planner.
    ============================================================ */
 
-/* Custom property animable: ángulo del glow cónico de las cards de cluster.
-   Sin @property el keyframe apGlowSpin no interpola y el halo no gira. */
-@property --ap-glow-angle {
-  syntax: "<angle>";
-  initial-value: 0deg;
-  inherits: false;
-}
-
 .ap-planner {
   /* Tokens extra del mockup (el resto vive en globals.css) */
   --task-warmup: #22c55e;
@@ -169,22 +161,31 @@
 }
 .ap-segmented button.is-selected { color: var(--text-primary); background: var(--bg-hover); box-shadow: var(--shadow-sm); }
 
-/* Progress — la barra de cumplimiento vive: shimmer de luz que la recorre
-   (background-position, mismo mecanismo que apSheen) + halo que respira en el
-   color del estado. El glow lo lleva el SPAN (la parte llena, con su width
-   inline): por eso el track no tiene overflow:hidden — recortaría el halo. */
+/* Progress — la barra de cumplimiento vive: un brillo angosto recorre la
+   barra de izquierda a derecha en loop de 2s (v4 — reemplaza la respiración
+   anterior por un barrido visible: la luz "resplandece por donde pasa").
+   El glow lo lleva el SPAN (la parte llena, con su width inline): por eso
+   el track no tiene overflow:hidden — recortaría el halo. El overlay ::after
+   se anima con translateX(-110% → 310%), así el barrido siempre parte del
+   borde izquierdo de la parte llena y sale por la derecha. */
 .ap-progress-track { height: 4px; border-radius: 99px; background: rgba(255, 255, 255, 0.06); }
 .ap-progress-track span {
   position: relative;
   height: 100%; display: block; min-width: 10px; border-radius: inherit;
   background: linear-gradient(90deg, #22c55e, #86efac);
-  animation: apBarPulse 2.6s ease-in-out infinite;
 }
 .ap-progress-track span::after {
   content: ""; position: absolute; inset: 0; border-radius: inherit;
-  background: linear-gradient(100deg, transparent 28%, rgba(255, 255, 255, 0.3) 50%, transparent 72%);
-  background-size: 250% 100%;
-  animation: apSheen 2.8s linear infinite;
+  /* Brillo angosto (~30% del ancho): transparente → blanco/verde tenue → transparente */
+  background: linear-gradient(100deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0) 18%,
+    rgba(187, 247, 208, 0.5) 48%,
+    rgba(255, 255, 255, 0) 78%,
+    transparent 100%);
+  transform: translateX(-110%);
+  animation: apBarSweep 2s linear infinite;
+  pointer-events: none;
 }
 
 /* Toast */
@@ -298,62 +299,79 @@
 .ap-cluster-row:hover { border-color: var(--border-default); box-shadow: var(--shadow-md); }
 .ap-cluster-row:focus-within { border-color: rgba(34, 197, 94, 0.35); }
 
-/* Glow giratorio en hover: halo tenue que recorre el perímetro de la card.
-   ::before con conic-gradient (verde con alpha baja) montado SOBRE el borde
-   (inset: -1px + padding 1px), animado por rotación del GRADIENTE (custom
-   property @property) — no rota el elemento, así el halo redondeado sigue
-   las esquinas de la card en vez de orbitarla. Máscara que deja solo el
-   anillo; luz tenue (alpha 0.10-0.14), nada de neón. */
-.ap-cluster-row::before {
-  content: "";
-  position: absolute; inset: -1px;
+/* Glow giratorio en hover (v4 — robusto): halo tenue que RECORRE el
+   perímetro de la card. Estructura clásica de "spinner de borde":
+   .ap-cluster-glow (mismo tamaño que la card, overflow hidden, z-index 0)
+   contiene el ::before, un DISCO conic-gradient 16px más grande que rota
+   con transform: rotate (animación del ELEMENTO, no de una custom property
+   — el giro se percibe en cualquier browser). La cubierta ::after (mismo
+   contorno de la card, inset 1.5px, mismas esquinas) tapa el centro del
+   disco: queda visible solo el ANILLO exterior de 1.5px sobre el borde de
+   la card. El glow NO depende de máscaras ni de @property: solo se rota el
+   pseudo-elemento. La "cabeza" de luz del gradiente nace en la esquina
+   superior izquierda y orbita. Fade-in de entrada + pausado sin glow. */
+.ap-cluster-glow {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
   border-radius: inherit;
-  padding: 1px;
-  background: conic-gradient(from var(--ap-glow-angle, 0deg),
-    rgba(34, 197, 94, 0) 0deg,
-    rgba(34, 197, 94, 0.1) 40deg,
-    rgba(134, 239, 172, 0.14) 70deg,
-    rgba(34, 197, 94, 0.1) 100deg,
-    rgba(34, 197, 94, 0) 140deg,
-    rgba(34, 197, 94, 0) 360deg);
-  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-  -webkit-mask-composite: xor;
-  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-  mask-composite: exclude;
   opacity: 0;
   transition: opacity 0.45s ease;
   pointer-events: none;
+  z-index: 0;
 }
-.ap-cluster-row:hover::before,
-.ap-cluster-row:focus-within::before {
+.ap-cluster-row:hover .ap-cluster-glow,
+.ap-cluster-row:focus-within .ap-cluster-glow {
   opacity: 1;
-  animation: apGlowSpin 3.2s linear infinite;
 }
+.ap-cluster-glow::before {
+  content: "";
+  position: absolute;
+  inset: -16px;
+  border-radius: 50%;
+  background: conic-gradient(from 100deg,
+    rgba(34, 197, 94, 0) 0deg,
+    rgba(34, 197, 94, 0.06) 30deg,
+    rgba(134, 239, 172, 0.1) 55deg,
+    rgba(34, 197, 94, 0.06) 80deg,
+    rgba(34, 197, 94, 0) 115deg,
+    rgba(34, 197, 94, 0) 360deg);
+  animation: apGlowOrbit 3s linear infinite;
+}
+.ap-cluster-glow::after {
+  content: "";
+  position: absolute;
+  inset: 1.5px;
+  border-radius: inherit;
+  background: rgba(15, 15, 18, 0.92);
+}
+/* El contenido de la card queda por encima del halo (z-index 1). */
+.ap-cluster-row > *:not(.ap-cluster-glow) { position: relative; z-index: 1; }
 
 .ap-cluster-row.is-suggested { border-style: dashed; border-color: rgba(139, 92, 246, 0.38); background: rgba(24, 18, 32, 0.6); }
 /* El glow de borde no funciona sobre borde dashed — el sugerido mantiene su
    identidad morada con un halo giratorio en su propio tono. */
-.ap-cluster-row.is-suggested::before {
-  background: conic-gradient(from var(--ap-glow-angle, 0deg),
+.ap-cluster-row.is-suggested .ap-cluster-glow::before {
+  background: conic-gradient(from 100deg,
     rgba(139, 92, 246, 0) 0deg,
-    rgba(139, 92, 246, 0.12) 40deg,
-    rgba(196, 181, 253, 0.16) 70deg,
-    rgba(139, 92, 246, 0.12) 100deg,
-    rgba(139, 92, 246, 0) 140deg,
+    rgba(139, 92, 246, 0.07) 30deg,
+    rgba(196, 181, 253, 0.11) 55deg,
+    rgba(139, 92, 246, 0.07) 80deg,
+    rgba(139, 92, 246, 0) 115deg,
     rgba(139, 92, 246, 0) 360deg);
 }
 /* Déficit: el halo gira en ámbar (coherente con el borde warn del row). */
-.ap-cluster-row.is-deficit::before {
-  background: conic-gradient(from var(--ap-glow-angle, 0deg),
+.ap-cluster-row.is-deficit .ap-cluster-glow::before {
+  background: conic-gradient(from 100deg,
     rgba(245, 158, 11, 0) 0deg,
-    rgba(245, 158, 11, 0.12) 40deg,
-    rgba(251, 191, 36, 0.16) 70deg,
-    rgba(245, 158, 11, 0.12) 100deg,
-    rgba(245, 158, 11, 0) 140deg,
+    rgba(245, 158, 11, 0.07) 30deg,
+    rgba(251, 191, 36, 0.11) 55deg,
+    rgba(245, 158, 11, 0.07) 80deg,
+    rgba(245, 158, 11, 0) 115deg,
     rgba(245, 158, 11, 0) 360deg);
 }
 /* Pausado: el cluster está dormido — sin glow en hover. */
-.ap-cluster-row.is-paused::before { animation: none; opacity: 0; }
+.ap-cluster-row.is-paused .ap-cluster-glow { opacity: 0; }
 .ap-cluster-row.is-paused { opacity: 0.75; }
 .ap-cluster-row.is-deficit { border-color: rgba(245, 158, 11, 0.28); }
 
@@ -391,10 +409,9 @@
 .ap-compliance { display: flex; flex-direction: column; gap: 5px; }
 .ap-compliance > div:first-child { display: flex; justify-content: space-between; color: var(--text-muted); font-size: 9px; letter-spacing: 0.05em; text-transform: uppercase; }
 .ap-compliance > div:first-child strong { color: var(--text-secondary); font-size: 10px; }
-/* is-warn: la barra pasa a ámbar y el halo del pulso también (ver apBarPulse) */
+/* is-warn: la barra pasa a ámbar (el barrido se mantiene, mismo mecanismo) */
 .ap-compliance.is-warn .ap-progress-track span {
   background: linear-gradient(90deg, #f59e0b, #fbbf24);
-  animation-name: apBarPulseWarn;
 }
 
 /* Acciones sugeridas */
@@ -427,13 +444,15 @@
 .ap-chart { position: relative; min-width: 0; height: 118px; border-radius: 12px; }
 .ap-chart svg { display: block; width: 100%; height: 100%; overflow: visible; }
 
-/* Liquid glass por proximidad — el día bajo el cursor (is-active) se enciende
-   con el glass completo; sus vecinos inmediatos (is-near) prenden la misma
-   anatomía a ~42% de opacidad; el resto queda apagado.
-   El delay por índice que setea el tsx (i*45ms, pensado para el encendido
-   "todas juntas") se pisa con una micro-cascada que radía desde el cursor:
-   activo inmediato, vecinos 90ms después — así el glass "persigue" al mouse
-   sin arrastrar 270ms de cola en la última columna. */
+/* Liquid glass por proximidad (v4) — el día bajo el cursor (is-active) se
+   enciende con el glass completo; los vecinos NO prenden la tarjeta entera:
+   solo se ilumina la arista que mira al día activo (is-near-left → borde
+   derecho, is-near-right → borde izquierdo) con un gradiente que nace fuerte
+   en esa arista y se desvanece hacia el centro — luz que se derrama desde el
+   día vecino. El delay por índice que setea el tsx (i*45ms, pensado para el
+   encendido "todas juntas") se pisa con una micro-cascada que radía desde el
+   cursor: activo inmediato, vecinos 90ms después — así el glass "persigue" al
+   mouse sin arrastrar 270ms de cola en la última columna. */
 .ap-glass-col {
   opacity: 0;
   transition: opacity 0.45s cubic-bezier(0.22, 1, 0.36, 1);
@@ -441,7 +460,7 @@
   will-change: opacity;
 }
 .ap-glass-col.is-active { transition-delay: 0s !important; }
-.ap-glass-col.is-near { transition-delay: 90ms !important; }
+.ap-glass-col.is-near-left, .ap-glass-col.is-near-right { transition-delay: 90ms !important; }
 .ap-glass-col rect.ap-glass-body {
   fill: rgba(255, 255, 255, 0.028);
   stroke: rgba(255, 255, 255, 0.06);
@@ -465,6 +484,16 @@
   transition: transform 0.5s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
+/* Bordes de vecinos (v4): el rect ap-glass-edge es un 42% del ancho con
+   gradiente que nace en la arista. El rect derecho lleva su propio fill
+   (apEdgeRightGrad); el izquierdo existe solo como "espejo" invisible. */
+.ap-glass-col rect.ap-glass-edge {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease;
+}
+.ap-glass-col rect.ap-glass-edge-left { opacity: 0; }
+
 /* Día bajo el cursor — glass completo */
 .ap-glass-col.is-active { opacity: 1; }
 .ap-glass-col.is-active line.ap-glass-sep { transform: translateY(0); }
@@ -474,10 +503,9 @@
   stroke: rgba(190, 242, 205, 0.14);
 }
 
-/* Vecinos inmediatos (±1) — misma anatomía, atenuada */
-.ap-glass-col.is-near { opacity: 0.42; }
-.ap-glass-col.is-near line.ap-glass-sep { transform: translateY(2px); }
-.ap-glass-col.is-near rect.ap-glass-spec { transform: scaleY(0.7); }
+/* Vecinos inmediatos (±1) — solo la arista que mira al día activo */
+.ap-glass-col.is-near-left rect.ap-glass-edge { opacity: 1; } /* borde derecho */
+.ap-glass-col.is-near-right rect.ap-glass-edge-left { opacity: 1; } /* borde izquierdo */
 
 /* Now line */
 .ap-now-line { stroke: #86efac; stroke-width: 1.5; vector-effect: non-scaling-stroke; }
@@ -501,6 +529,8 @@
 .ap-chart-tip {
   position: absolute; z-index: 35;
   min-width: 148px;
+  max-width: 236px;
+  max-height: 212px;
   padding: 10px 12px;
   background: rgba(20, 24, 22, 0.9);
   border: 1px solid rgba(134, 239, 172, 0.22);
@@ -512,14 +542,33 @@
   transition: opacity 0.18s ease, transform 0.18s ease;
 }
 .ap-chart-tip.is-visible { opacity: 1; transform: translateY(0) scale(1); }
+/* Flip vertical (v4): cerca del borde inferior del viewport el tooltip se
+   posiciona por encima del cursor (bottom: 6 en vez de top: 6). */
+.ap-chart-tip.is-flip { transform: translateY(-6px) scale(0.97); }
+.ap-chart-tip.is-flip.is-visible { transform: translateY(0) scale(1); }
 .ap-chart-tip h5 { margin: 0; color: var(--text-primary); font-size: 11px; letter-spacing: -0.02em; }
 .ap-chart-tip h5 span { color: var(--text-muted); font-weight: 500; font-size: 10px; }
-.ap-chart-tip ul { margin: 8px 0 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 5px; }
+/* El ul es la única parte que crece con las tareas: scroll con fade inferior
+   para que el tooltip nunca desborde el viewport (el cap de 3 tareas ya lo
+   contiene; el fade solo cubre el caso extremo). */
+.ap-chart-tip ul {
+  margin: 8px 0 0; padding: 0; list-style: none;
+  display: flex; flex-direction: column; gap: 5px;
+  max-height: 160px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  mask-image: linear-gradient(to bottom, #000 82%, transparent 100%);
+  -webkit-mask-image: linear-gradient(to bottom, #000 82%, transparent 100%);
+  scrollbar-width: thin;
+  scrollbar-color: rgba(134, 239, 172, 0.25) transparent;
+}
 .ap-chart-tip li { display: flex; align-items: center; gap: 7px; color: var(--text-secondary); font-size: 10px; }
 .ap-chart-tip li i { width: 6px; height: 6px; border-radius: 50%; flex: 0 0 6px; }
 .ap-chart-tip li em { margin-left: auto; color: var(--text-primary); font-style: normal; font-weight: 700; font-size: 10px; }
 .ap-chart-tip li em.ap-tip-late { color: #fbbf24; }
 .ap-chart-tip .ap-tip-task { flex-wrap: wrap; gap: 4px 7px; }
+/* Fila "+N más" (v4): atenuada, resume las tareas que no entran en el cap. */
+.ap-chart-tip .ap-tip-more { color: var(--text-dim); font-size: 9.5px; font-weight: 600; padding-top: 2px; }
 .ap-chart-tip .ap-tip-actions { display: inline-flex; gap: 4px; margin-left: 13px; }
 .ap-chart-tip .ap-tip-actions button {
   min-height: 20px; padding: 0 7px;
@@ -760,27 +809,32 @@
 
 /* ============ Efectos premium ============ */
 
-/* Halo que respira en las barras de cumplimiento — verde por defecto (el
-   box-shadow se pinta sobre el propio span, así sigue su color de estado). */
-@keyframes apBarPulse {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0); }
-  50% { box-shadow: 0 0 6px 1px rgba(34, 197, 94, 0.45); }
+/* Barrido de brillo de las barras de cumplimiento (v4): el overlay ::after
+   viaja de -110% (fuera por la izquierda) a 310% (fuera por la derecha) —
+   la luz "resplandece por donde pasa", loop de 2s. El color base de la barra
+   (verde/ámbar) lo pone el span; este keyframe solo mueve el overlay. */
+@keyframes apBarSweep {
+  0% { transform: translateX(-110%); }
+  100% { transform: translateX(310%); }
 }
-@keyframes apBarPulseWarn {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0); }
-  50% { box-shadow: 0 0 6px 1px rgba(245, 158, 11, 0.45); }
+/* Glow giratorio del borde de la card (v4 — robusto): rota el ELEMENTO
+   ::before (disco conic-gradient), no una custom property: el giro se ve en
+   cualquier browser. ~3s por vuelta. El fade-in de entrada lo hace el
+   transition de opacity del ::before (ver .ap-cluster-row::before). */
+@keyframes apGlowOrbit {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
-/* Glow giratorio del borde de la card — rota el ángulo del gradiente cónico,
-   no el elemento, para que el halo siga las esquinas redondeadas. */
-@keyframes apGlowSpin { to { --ap-glow-angle: 360deg; } }
 
 @media (prefers-reduced-motion: reduce) {
   .ap-planner *, .ap-planner *::before, .ap-planner *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
   /* Sin movimiento: glass sin cascada, glow apagado (queda el hover de
      borde que ya tenía la card). El ECG estático se define en
      planner-extra.css porque sus keyframes viven ahí. */
-  .ap-glass-col, .ap-glass-col.is-active, .ap-glass-col.is-near { transition-delay: 0s !important; }
-  .ap-cluster-row::before { animation: none !important; opacity: 0; }
+  .ap-glass-col, .ap-glass-col.is-active, .ap-glass-col.is-near-left, .ap-glass-col.is-near-right { transition-delay: 0s !important; }
+  .ap-cluster-glow { opacity: 0 !important; }
+  /* La barra de cumplimiento queda estática (sin barrido) */
+  .ap-progress-track span::after { animation: none !important; transform: none; opacity: 0.35; }
 }
 
 /* ============ Responsive ============ */

@@ -43,6 +43,13 @@ const KIND_LABEL: Record<"warmup" | "scan" | "publish", string> = {
   publish: "Publish",
 };
 
+/** Máximo de filas de tareas en el tooltip del chart; el resto se resume en "+N más". */
+const MAX_TIP_TASKS = 3;
+/** Altura máxima estimada del tooltip (header + fila de métrica + hasta
+    MAX_TIP_TASKS tareas + fila "+N más" + paddings). Se usa para decidir el
+    flip vertical antes de que el DOM tenga el tooltip renderizado. */
+const TIP_MAX_H = 226;
+
 interface DayTaskInfo {
   task: WeekTask;
   dayIdx: number;
@@ -118,9 +125,10 @@ interface ChartProps {
 }
 
 function Chart({ cluster, metric, todayIndex, nowRatio, weekDays, dayTasks, onOpenDay, onMoveTask, onCancelTask, canManage }: ChartProps) {
-  /** Día bajo el cursor (por X) — liquid glass por proximidad: día = is-active, ±1 = is-near. */
+  /** Día bajo el cursor (por X) — liquid glass por proximidad:
+      día = is-active, anterior = is-near-left, siguiente = is-near-right. */
   const [hoverDay, setHoverDay] = useState<number | null>(null);
-  const [tip, setTip] = useState<{ x: number; dayIdx: number } | null>(null);
+  const [tip, setTip] = useState<{ x: number; dayIdx: number; flip: boolean } | null>(null);
 
   const series = useMemo(() => cluster.metricSeries[metric] || [], [cluster.metricSeries, metric]);
   const max = niceMax(metric, series);
@@ -155,17 +163,25 @@ function Chart({ cluster, metric, todayIndex, nowRatio, weekDays, dayTasks, onOp
     const ratio = Math.min(0.999, Math.max(0, (event.clientX - rect.left) / rect.width));
     const dayIdx = Math.min(6, Math.max(0, Math.round(((ratio * CHART_W) - PAD_X) / (INNER_W / 6) - 0.5)));
     const tipX = Math.min(rect.width - 210, Math.max(0, ratio * rect.width - 74));
+    // Flip vertical: si el tooltip tocaría el borde inferior del viewport,
+    // se posiciona por encima del cursor (el chart mide 118px; el tooltip
+    // cae 6px abajo, así que con 132px de margen alcanza en cualquier caso).
+    const flip = rect.bottom + 6 + TIP_MAX_H > window.innerHeight;
     setHoverDay(dayIdx);
-    setTip({ x: tipX, dayIdx });
+    setTip({ x: tipX, dayIdx, flip });
   };
 
   const tipDay = tip ? dayTasks.filter((info) => info.dayIdx === tip.dayIdx) : [];
 
-  /** Clase de proximidad al día activo: is-active (día bajo el cursor) / is-near (±1) / sin clase. */
+  /** Clase de proximidad al día activo: is-active (día bajo el cursor),
+      is-near-left (día anterior: ilumina su borde derecho),
+      is-near-right (día siguiente: ilumina su borde izquierdo) / sin clase. */
   const glassClass = (i: number): string => {
     if (hoverDay == null) return "";
     if (hoverDay === i) return "is-active";
-    return Math.abs(hoverDay - i) === 1 ? "is-near" : "";
+    if (hoverDay - i === 1) return "is-near-left";
+    if (i - hoverDay === 1) return "is-near-right";
+    return "";
   };
 
   return (
@@ -184,6 +200,19 @@ function Chart({ cluster, metric, todayIndex, nowRatio, weekDays, dayTasks, onOp
             <stop offset="0%" stopColor="rgba(255,255,255,0.10)" />
             <stop offset="55%" stopColor="rgba(255,255,255,0.02)" />
             <stop offset="100%" stopColor="rgba(255,255,255,0)" />
+          </linearGradient>
+          {/* v4 — luz de borde de los vecinos del día activo: nace fuerte en la
+              arista que mira al día bajo el cursor y se desvanece hacia el
+              centro de la tarjeta (efecto "luz que se derrama"). */}
+          <linearGradient id="apEdgeRightGrad" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0%" stopColor="rgba(190, 242, 205, 0)" />
+            <stop offset="55%" stopColor="rgba(190, 242, 205, 0.1)" />
+            <stop offset="100%" stopColor="rgba(190, 242, 205, 0.34)" />
+          </linearGradient>
+          <linearGradient id="apEdgeLeftGrad" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0%" stopColor="rgba(190, 242, 205, 0.34)" />
+            <stop offset="45%" stopColor="rgba(190, 242, 205, 0.1)" />
+            <stop offset="100%" stopColor="rgba(190, 242, 205, 0)" />
           </linearGradient>
         </defs>
 
@@ -204,6 +233,26 @@ function Chart({ cluster, metric, todayIndex, nowRatio, weekDays, dayTasks, onOp
             >
               <rect className="ap-glass-body" x={x0 + gap} y={TOP - 6} width={w - gap * 2} height={INNER_H + 12} rx={9} />
               <rect className="ap-glass-spec" x={x0 + gap + 2} y={TOP - 6} width={w - gap * 2 - 4} height={INNER_H * 0.22 + 8} rx={7} />
+              {/* v4 — borde que se ilumina cuando el día es vecino del activo:
+                  is-near-left prende el costado derecho, is-near-right el izquierdo */}
+              <rect
+                className="ap-glass-edge"
+                x={x0 + gap}
+                y={TOP - 6}
+                width={Math.max(1, w - gap * 2) * 0.42}
+                height={INNER_H + 12}
+                rx={9}
+                fill="url(#apEdgeRightGrad)"
+              />
+              <rect
+                className="ap-glass-edge ap-glass-edge-left"
+                x={x0 + w - gap - Math.max(1, w - gap * 2) * 0.42}
+                y={TOP - 6}
+                width={Math.max(1, w - gap * 2) * 0.42}
+                height={INNER_H + 12}
+                rx={9}
+                fill="url(#apEdgeLeftGrad)"
+              />
               <line className="ap-glass-sep" x1={x0 + w / 2} y1={TOP - 6} x2={x0 + w / 2} y2={TOP + INNER_H + 6} />
             </g>
           );
@@ -265,8 +314,8 @@ function Chart({ cluster, metric, todayIndex, nowRatio, weekDays, dayTasks, onOp
 
       {/* Tooltip del día */}
       <div
-        className={`ap-chart-tip ${tip ? "is-visible" : ""}`}
-        style={tip ? { left: tip.x, top: 6 } : undefined}
+        className={`ap-chart-tip ${tip ? "is-visible" : ""} ${tip?.flip ? "is-flip" : ""}`}
+        style={tip ? { left: tip.x, top: tip.flip ? "auto" : 6, bottom: tip.flip ? 6 : "auto" } : undefined}
       >
         {tip && (
           <>
@@ -277,7 +326,7 @@ function Chart({ cluster, metric, todayIndex, nowRatio, weekDays, dayTasks, onOp
                 {METRICS[metric].label}
                 <em>{series[tip.dayIdx] ?? 0}{metric === "warmup" ? " min" : metric === "posts" ? "" : "K"}</em>
               </li>
-              {tipDay.length ? tipDay.map((info) => (
+              {tipDay.length ? tipDay.slice(0, MAX_TIP_TASKS).map((info) => (
                 <li key={info.task.id} className="ap-tip-task">
                   <i style={{ background: TASK_TYPE_META[info.task.taskType]?.color || "#22c55e" }} />
                   <span>{KIND_LABEL[info.kind]} · #{info.task.id} · {formatBATime(info.task.scheduledFor)}</span>
@@ -290,6 +339,9 @@ function Chart({ cluster, metric, todayIndex, nowRatio, weekDays, dayTasks, onOp
                   )}
                 </li>
               )) : <li><i style={{ background: lineColor }} />Sin tareas <em>—</em></li>}
+              {tipDay.length > MAX_TIP_TASKS && (
+                <li className="ap-tip-more">+{tipDay.length - MAX_TIP_TASKS} más</li>
+              )}
             </ul>
           </>
         )}
@@ -369,6 +421,11 @@ function ClusterRow({ cluster, weekStart, weekDays, todayIndex, nowRatio, canMan
     <article
       className={`ap-cluster-row ${cluster.status === "suggested" ? "is-suggested" : ""} ${cluster.health === "deficit" ? "is-deficit" : ""} ${cluster.health === "paused" ? "is-paused" : ""}`}
     >
+      {/* v4 — contenedor del glow giratorio: clipea el disco rotante a la
+          forma de la card (overflow hidden acá, no en la fila, para no
+          recortar el tooltip del chart). ::before rota (transform),
+          ::after es la cubierta que deja ver solo el anillo del borde. */}
+      <div className="ap-cluster-glow" aria-hidden="true" />
       <div
         className="ap-cluster-card"
         tabIndex={0}
