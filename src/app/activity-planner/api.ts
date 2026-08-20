@@ -13,6 +13,7 @@ import type {
   PutRoutineBody,
   PutRoutineResponse,
   PublishToClusterBody,
+  PublishToClusterFileBody,
   PublishToClusterResponse,
   RoutinesResponse,
   ScanSuggestionsResponse,
@@ -149,11 +150,24 @@ export const plannerApi = {
     });
   },
 
-  /** POST /api/clusters/:id/publish */
+  /** POST /api/clusters/:id/publish — body JSON legacy (v1, videoUrl). */
   publishToCluster(token: string, id: number, body: PublishToClusterBody): Promise<PublishToClusterResponse> {
     return plannerRequest<PublishToClusterResponse>(`/api/clusters/${id}/publish`, token, {
       method: "POST",
       body: JSON.stringify(body),
+    });
+  },
+
+  /** POST /api/clusters/:id/publish — multipart/form-data con archivo (v3).
+   *  NO se setea Content-Type: el boundary lo genera el browser para el FormData. */
+  publishToClusterWithFile(token: string, id: number, body: PublishToClusterFileBody): Promise<PublishToClusterResponse> {
+    const form = new FormData();
+    form.append("video", body.file);
+    form.append("title", body.title);
+    if (body.scheduledFor) form.append("scheduledFor", body.scheduledFor);
+    return plannerRequest<PublishToClusterResponse>(`/api/clusters/${id}/publish`, token, {
+      method: "POST",
+      body: form,
     });
   },
 

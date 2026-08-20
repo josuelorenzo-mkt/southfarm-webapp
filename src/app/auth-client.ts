@@ -82,7 +82,8 @@ export async function authRequest<T>(
   retry = true,
 ): Promise<T> {
   const headers = new Headers(init.headers);
-  if (init.body && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
+  // FormData NO lleva Content-Type acá: el browser genera el boundary multipart.
+  if (init.body && !headers.has('Content-Type') && !(init.body instanceof FormData)) headers.set('Content-Type', 'application/json');
   const activeToken = getActiveAccessToken(token);
   if (activeToken) headers.set('Authorization', `Bearer ${activeToken}`);
 

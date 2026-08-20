@@ -79,6 +79,98 @@ function Bubble({
   );
 }
 
+/* ============================================================
+   Warmup por cuenta (v3): mini-chart ECG por cuenta del cluster.
+   Estado de color COMPUTADO POR CUENTA:
+   - is-bad: sin actividad (todos 0) los últimos 5 días.
+   - is-warn: sin actividad los últimos 2 días (prioridad menor que bad).
+   - default: verde.
+   Reusa las clases ECG de .ap-history-chart (planner-extra.css) con
+   una variante mini (.ap-history-chart-mini).
+   ============================================================ */
+
+const MINI_W = 320;
+const MINI_H = 48;
+const MINI_T = 7;
+const MINI_B = 7;
+const MINI_P = 4;
+
+function accountStateClass(series: number[]): string {
+  const last5 = series.slice(-5);
+  const last2 = series.slice(-2);
+  if (last5.length >= 5 && last5.every((v) => !v)) return "is-bad";
+  if (last2.length >= 2 && last2.every((v) => !v)) return "is-warn";
+  return "";
+}
+
+function AccountWarmupMini({ series, accountId, platform, username, alias }: {
+  series: number[];
+  accountId: number;
+  platform: PlannerPlatform;
+  username: string;
+  alias: string | null;
+}) {
+  const max = Math.max(40, ...series);
+  const points = series.map((value, i) => {
+    const x = MINI_P + ((MINI_W - MINI_P * 2) / Math.max(1, series.length - 1)) * i;
+    const y = MINI_T + (MINI_H - MINI_T - MINI_B) - (value / max) * (MINI_H - MINI_T - MINI_B);
+    return [x, y] as [number, number];
+  });
+  const line = smoothPath(points);
+  const area = points.length > 1
+    ? `${line} L${points[points.length - 1][0].toFixed(1)} ${MINI_H - MINI_B} L${points[0][0]} ${MINI_H - MINI_B} Z`
+    : "";
+  const targetY = MINI_T + (MINI_H - MINI_T - MINI_B) - (40 / max) * (MINI_H - MINI_T - MINI_B);
+  const avg = series.length ? Math.round(series.reduce((s, v) => s + v, 0) / series.length) : 0;
+  const stateClass = accountStateClass(series);
+  const gradId = `ap-hg-warmup-${accountId}`;
+  const meta = PLATFORM_META[platform] || PLATFORM_META.instagram;
+
+  return (
+    <div className={`ap-warmup-mini ${stateClass ? `is-${stateClass === "is-warn" ? "warn" : "bad"}` : ""}`}>
+      <div className="ap-warmup-mini-head">
+        <span className={`ap-bubble ap-bubble-${platform} ap-warmup-mini-bubble`} role="img" aria-label={`${meta.label}: @${username}`}>
+          {PLATFORM_GLYPH[platform] || meta.short}
+        </span>
+        <div className="ap-warmup-mini-title">
+          <strong>@{username}</strong>
+          <span>{alias ? `celular ${alias} · ` : ""}{avg} min/día · últimos 14d</span>
+        </div>
+        {stateClass && (
+          <span className={`ap-badge ${stateClass === "is-warn" ? "ap-badge-warn" : "ap-badge-bad"}`} title={stateClass === "is-warn" ? "Sin actividad de warmup en los últimos 2 días" : "Sin actividad de warmup en los últimos 5 días"}>
+            <span className="ap-badge-dot" />{stateClass === "is-warn" ? "2 días sin actividad" : "5 días sin actividad"}
+          </span>
+        )}
+      </div>
+      <div className={`ap-history-chart ap-history-chart-mini ${stateClass}`}>
+        <svg viewBox={`0 0 ${MINI_W} ${MINI_H}`} preserveAspectRatio="none" aria-hidden="true">
+          <defs>
+            <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="#22c55e" stopOpacity="0.3" />
+              <stop offset="100%" stopColor="#22c55e" stopOpacity="0" />
+            </linearGradient>
+          </defs>
+          <line className="ap-wtarget" x1={MINI_P} y1={targetY} x2={MINI_W - MINI_P} y2={targetY} />
+          {area && <path className="ap-warea" d={area} fill={`url(#${gradId})`} />}
+          {line && <path className="ap-wline" d={line} stroke="#22c55e" />}
+          {points.map((p, i) => (
+            <circle
+              key={i}
+              className="ap-dot"
+              cx={p[0].toFixed(1)}
+              cy={p[1].toFixed(1)}
+              r={i === points.length - 1 ? 3 : 2.2}
+              fill="#22c55e"
+              stroke="#09090b"
+              strokeWidth="1.5"
+            />
+          ))}
+        </svg>
+      </div>
+    </div>
+  );
+}
+
 export default function ClusterDetail({
   clusterId,
   onClose,
@@ -632,47 +724,68 @@ export default function ClusterDetail({
             </div>
           </section>
 
-          {/* Warmup histórico 14 días */}
+          {/* Warmup histórico 14 días — por cuenta (v3), con fallback al agregado */}
           <section className="ap-card">
             <div className="ap-card-heading">
               <div>
                 <p className="ap-eyebrow">WARMUP HISTORY · ÚLTIMOS 14 DÍAS</p>
-                <h3>Warmup del cluster</h3>
-                <p className="ap-card-subtitle">Minutos ejecutados por día · línea de objetivo: 40 min/cuenta/día.</p>
+                <h3>Warmup por cuenta</h3>
+                <p className="ap-card-subtitle">Minutos ejecutados por día y por cuenta · línea de objetivo: 40 min/cuenta/día.</p>
               </div>
             </div>
-            <div className={`ap-history-chart ${historyStateClass}`}>
-              <svg viewBox={`0 0 ${HISTORY_W} ${HISTORY_H}`} preserveAspectRatio="none" aria-hidden="true">
-                <defs>
-                  <linearGradient id="ap-hg-warmup" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#22c55e" stopOpacity="0.3" />
-                    <stop offset="100%" stopColor="#22c55e" stopOpacity="0" />
-                  </linearGradient>
-                </defs>
-                <line className="ap-wtarget" x1={targetX1} y1={targetY} x2={targetX2} y2={targetY} />
-                {warmupArea && <path className="ap-warea" d={warmupArea} fill="url(#ap-hg-warmup)" />}
-                {warmupLine && <path className="ap-wline" d={warmupLine} stroke="#22c55e" />}
-                {warmupPoints.map((p, i) => (
-                  <circle
-                    key={i}
-                    className="ap-dot"
-                    cx={p[0].toFixed(1)}
-                    cy={p[1].toFixed(1)}
-                    r={i === warmupPoints.length - 1 ? 3.4 : 2.4}
-                    fill="#22c55e"
-                    stroke="#09090b"
-                    strokeWidth="1.5"
-                  />
-                ))}
-              </svg>
-            </div>
-            <div className="ap-history-labels">
-              {labelDates.map((dateKey) => (
-                <span key={dateKey} className={dateKey === todayKey ? "is-today" : ""}>
-                  {dateKey === todayKey ? "hoy" : shortDate(dateKey).slice(0, 6)}
-                </span>
-              ))}
-            </div>
+            {history?.accountsWarmup?.length ? (
+              <div className="ap-warmup-mini-grid">
+                {history.accountsWarmup.map((entry) => {
+                  const account = cluster.accounts.find((acc) => acc.id === entry.accountId);
+                  return (
+                    <AccountWarmupMini
+                      key={entry.accountId}
+                      series={entry.warmupByDay || []}
+                      accountId={entry.accountId}
+                      platform={entry.platform}
+                      username={entry.username}
+                      alias={account?.deviceAlias ?? null}
+                    />
+                  );
+                })}
+              </div>
+            ) : (
+              /* Fallback retrocompatible: el agregado del cluster (v1). */
+              <>
+                <div className={`ap-history-chart ${historyStateClass}`}>
+                  <svg viewBox={`0 0 ${HISTORY_W} ${HISTORY_H}`} preserveAspectRatio="none" aria-hidden="true">
+                    <defs>
+                      <linearGradient id="ap-hg-warmup" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="#22c55e" stopOpacity="0.3" />
+                        <stop offset="100%" stopColor="#22c55e" stopOpacity="0" />
+                      </linearGradient>
+                    </defs>
+                    <line className="ap-wtarget" x1={targetX1} y1={targetY} x2={targetX2} y2={targetY} />
+                    {warmupArea && <path className="ap-warea" d={warmupArea} fill="url(#ap-hg-warmup)" />}
+                    {warmupLine && <path className="ap-wline" d={warmupLine} stroke="#22c55e" />}
+                    {warmupPoints.map((p, i) => (
+                      <circle
+                        key={i}
+                        className="ap-dot"
+                        cx={p[0].toFixed(1)}
+                        cy={p[1].toFixed(1)}
+                        r={i === warmupPoints.length - 1 ? 3.4 : 2.4}
+                        fill="#22c55e"
+                        stroke="#09090b"
+                        strokeWidth="1.5"
+                      />
+                    ))}
+                  </svg>
+                </div>
+                <div className="ap-history-labels">
+                  {labelDates.map((dateKey) => (
+                    <span key={dateKey} className={dateKey === todayKey ? "is-today" : ""}>
+                      {dateKey === todayKey ? "hoy" : shortDate(dateKey).slice(0, 6)}
+                    </span>
+                  ))}
+                </div>
+              </>
+            )}
           </section>
         </div>
 

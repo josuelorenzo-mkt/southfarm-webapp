@@ -466,3 +466,234 @@
     opacity: 1;
   }
 }
+
+/* ============================================================
+   v3 — Warmup POR CUENTA (grilla de mini-charts ECG en el detalle)
+   ============================================================ */
+
+.ap-planner .ap-warmup-mini-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 12px;
+}
+.ap-planner .ap-warmup-mini {
+  padding: 12px 14px;
+  border: 1px solid var(--border-subtle); border-radius: 12px;
+  background: rgba(255, 255, 255, 0.018);
+}
+.ap-planner .ap-warmup-mini.is-warn { border-color: rgba(245, 158, 11, 0.28); background: rgba(245, 158, 11, 0.04); }
+.ap-planner .ap-warmup-mini.is-bad { border-color: rgba(239, 68, 68, 0.3); background: rgba(239, 68, 68, 0.045); }
+.ap-planner .ap-warmup-mini-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+.ap-planner .ap-warmup-mini-bubble { width: 22px; height: 22px; flex: 0 0 22px; font-size: 8px; border-radius: 50%; }
+.ap-planner .ap-warmup-mini-title { min-width: 0; flex: 1; }
+.ap-planner .ap-warmup-mini-title strong {
+  display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--text-primary); font-size: 11.5px;
+}
+.ap-planner .ap-warmup-mini-title span { display: block; margin-top: 3px; color: var(--text-muted); font-size: 9px; }
+/* Variante mini del ECG: reusa .ap-history-chart (animaciones y estados
+   is-warn/is-bad ya definidos arriba); solo se achica el alto del svg.
+   Va después de las reglas base para ganar por igual especificidad. */
+.ap-planner .ap-history-chart-mini { margin-top: 0; }
+.ap-planner .ap-history-chart-mini svg { height: 48px; }
+
+/* ============================================================
+   v3 — Editor de rutinas: sesiones por día y day-chips
+   ============================================================ */
+
+/* selector de sesiones por día: 1–4, un valor exacto (no es un rango) */
+.ap-planner .ap-sess-chips { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+.ap-planner .ap-sess-chip {
+  min-height: 44px;
+  display: grid; place-items: center;
+  color: var(--text-muted); font-size: 12px; font-weight: 700;
+  border: 1px solid var(--border-subtle); border-radius: 9px;
+  background: rgba(255, 255, 255, 0.018);
+  transition: 0.15s ease;
+}
+.ap-planner .ap-sess-chip:hover { color: var(--text-secondary); border-color: var(--border-default); }
+.ap-planner .ap-sess-chip.is-on { color: #bbf7d0; border-color: rgba(34, 197, 94, 0.32); background: var(--accent-dim); }
+.ap-planner .ap-sess-chip small { display: block; font-size: 7px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-dim); }
+.ap-planner .ap-sess-chip.is-on small { color: rgba(134, 239, 172, 0.6); }
+.ap-planner .ap-sess-chip:focus-visible, .ap-planner .ap-day-chip:focus-visible { outline: 2px solid #86efac; outline-offset: 2px; }
+.ap-planner .ap-sess-chip:disabled, .ap-planner .ap-day-chip:disabled { opacity: 0.55; cursor: default; }
+
+/* day-chips: L M M J V S D (selección múltiple para publishing) */
+.ap-planner .ap-days-row { display: flex; gap: 6px; }
+.ap-planner .ap-day-chip {
+  flex: 1; min-height: 40px;
+  display: grid; place-items: center;
+  color: var(--text-muted); font-size: 10px; font-weight: 700;
+  border: 1px solid var(--border-subtle); border-radius: 9px;
+  background: rgba(255, 255, 255, 0.018);
+  transition: 0.15s ease;
+}
+.ap-planner .ap-day-chip:hover { color: var(--text-secondary); border-color: var(--border-default); }
+.ap-planner .ap-day-chip.is-on { color: #bbf7d0; border-color: rgba(34, 197, 94, 0.32); background: var(--accent-dim); }
+
+/* card pausada: chips y summary se atenúan junto con el body */
+.ap-planner .ap-routine-card.is-paused .ap-day-chip.is-on,
+.ap-planner .ap-routine-card.is-paused .ap-sess-chip.is-on {
+  color: var(--text-muted);
+  border-color: var(--border-subtle);
+  background: rgba(255, 255, 255, 0.02);
+}
+.ap-planner .ap-routine-card.is-paused .ap-rule-summary span {
+  color: var(--text-muted);
+  border-color: var(--border-subtle);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+/* resumen de la regla de warmup (p.ej. "45 min en 3 sesiones · gap máx 3 h") */
+.ap-planner .ap-rule-summary {
+  display: flex; align-items: center; gap: 8px;
+  margin: 0;
+  color: var(--text-muted); font-size: 9px; font-weight: 700;
+}
+.ap-planner .ap-rule-summary span {
+  padding: 7px 11px;
+  color: #bbf7d0;
+  border: 1px solid rgba(34, 197, 94, 0.22); border-radius: 8px;
+  background: rgba(34, 197, 94, 0.055);
+}
+
+/* ============================================================
+   v3 — Publicación de cluster: dropzone de archivo (video)
+   ============================================================ */
+
+.ap-planner .ap-cluster-pub {
+  border-color: rgba(192, 38, 211, 0.28);
+  background: linear-gradient(150deg, rgba(192, 38, 211, 0.06), rgba(15, 15, 18, 0.9) 55%);
+}
+.ap-planner .ap-dropzone {
+  position: relative;
+  display: flex; align-items: center; flex-direction: column; gap: 6px;
+  margin: 4px 0 2px; padding: 26px 16px;
+  color: var(--text-muted); text-align: center;
+  border: 1.5px dashed var(--border-default); border-radius: 12px;
+  background: rgba(255, 255, 255, 0.012);
+  cursor: pointer; transition: border-color 0.16s ease, background 0.16s ease, color 0.16s ease, box-shadow 0.16s ease;
+}
+.ap-planner .ap-dropzone:hover { border-color: rgba(192, 38, 211, 0.42); background: rgba(192, 38, 211, 0.05); color: #e879f9; }
+/* estado drag-over: el acento publish "enciende" la zona */
+.ap-planner .ap-dropzone.is-over {
+  border-color: rgba(232, 121, 249, 0.65);
+  background: rgba(192, 38, 211, 0.1);
+  color: #f5d0fe;
+  box-shadow: inset 0 0 0 1px rgba(232, 121, 249, 0.25), 0 0 24px rgba(192, 38, 211, 0.12);
+}
+.ap-planner .ap-dropzone strong { color: var(--text-secondary); font-size: 11px; }
+.ap-planner .ap-dropzone small { color: var(--text-dim); font-size: 9px; }
+.ap-planner .ap-dropzone:focus-visible { outline: 2px solid #86efac; outline-offset: 2px; }
+.ap-planner .ap-drop-icon {
+  width: 37px; height: 37px; margin-bottom: 2px;
+  display: grid; place-items: center;
+  color: #e879f9;
+  border: 1px solid rgba(192, 38, 211, 0.3); border-radius: 11px;
+  background: rgba(192, 38, 211, 0.09);
+  transition: transform 0.18s ease;
+}
+.ap-planner .ap-dropzone.is-over .ap-drop-icon { transform: translateY(-2px) scale(1.06); }
+
+/* archivo cargado */
+.ap-planner .ap-uploaded {
+  display: flex; align-items: center; gap: 13px;
+  margin: 4px 0 2px; padding: 11px 12px;
+  border: 1px solid rgba(192, 38, 211, 0.3); border-radius: 12px;
+  background: rgba(192, 38, 211, 0.055);
+  animation: apFloatIn 0.3s ease both;
+}
+@keyframes apFloatIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: none; }
+}
+.ap-planner .ap-up-thumb {
+  width: 52px; height: 66px; flex: 0 0 52px;
+  display: grid; place-items: center; gap: 3px;
+  color: rgba(255, 255, 255, 0.6);
+  border: 1px solid rgba(232, 121, 249, 0.28); border-radius: 8px;
+  background: linear-gradient(160deg, #3b1d31, #14101a 70%);
+  position: relative; overflow: hidden;
+}
+.ap-planner .ap-up-thumb::before {
+  content: ""; position: absolute; inset: 0;
+  background: radial-gradient(circle at 30% 20%, rgba(255, 255, 255, 0.12), transparent 55%);
+}
+.ap-planner .ap-up-thumb svg, .ap-planner .ap-up-thumb span { position: relative; z-index: 1; }
+.ap-planner .ap-up-thumb span { font-size: 8px; font-weight: 700; letter-spacing: 0.05em; }
+.ap-planner .ap-up-main { min-width: 0; flex: 1; text-align: left; }
+.ap-planner .ap-up-main strong {
+  display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--text-primary); font-size: 11.5px;
+}
+.ap-planner .ap-up-main span { display: block; margin-top: 5px; color: var(--text-muted); font-size: 9px; }
+.ap-planner .ap-up-main small { display: block; margin-top: 3px; color: var(--text-dim); font-size: 9px; }
+.ap-planner .ap-up-remove {
+  flex: 0 0 auto; width: 30px; height: 30px;
+  display: grid; place-items: center;
+  color: var(--text-muted);
+  border: 1px solid var(--border-subtle); border-radius: 8px;
+  background: rgba(0, 0, 0, 0.2);
+  transition: 0.15s ease;
+}
+.ap-planner .ap-up-remove:hover { color: #fca5a5; border-color: rgba(239, 68, 68, 0.4); background: var(--error-dim); }
+.ap-planner .ap-up-remove:focus-visible { outline: 2px solid #86efac; outline-offset: 2px; }
+
+/* ============================================================
+   v3 — Vista día: scroll del timeline + línea de AHORA + DnD
+   ============================================================ */
+
+/* contenedor scrolleable del timeline (fix v3: el scroll vive acá,
+   no en la página) */
+.ap-planner .ap-timeline-scroll {
+  max-height: 640px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 6px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.14) transparent;
+}
+
+/* Línea de AHORA: vertical punteada a la altura de la hora actual,
+   con chip arriba. Vive dentro de .ap-timeline (position: relative)
+   y se posiciona por JS con top en porcentaje de la ventana 12:00–22:00. */
+.ap-planner .ap-now-marker {
+  position: absolute; left: 53px; right: 6px; z-index: 6;
+  pointer-events: none;
+}
+.ap-planner .ap-now-marker::before {
+  content: ""; position: absolute; left: 0; right: 0; top: 0;
+  border-top: 1.5px dashed rgba(134, 239, 172, 0.75);
+}
+.ap-planner .ap-now-marker span {
+  position: absolute; left: -4px; top: -22px;
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 3px 8px;
+  color: #bbf7d0; font-size: 9px; font-weight: 800; letter-spacing: 0.08em;
+  border: 1px solid rgba(134, 239, 172, 0.45); border-radius: 99px;
+  background: rgba(9, 9, 11, 0.85);
+  backdrop-filter: blur(8px);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5), 0 0 14px rgba(34, 197, 94, 0.12);
+  white-space: nowrap;
+}
+/* fuera de la ventana 12:00–22:00: clamp atenuado (línea punteada gris) */
+.ap-planner .ap-now-marker.is-out-of-range { opacity: 0.55; }
+.ap-planner .ap-now-marker.is-out-of-range::before { border-top-style: dotted; border-top-color: rgba(255, 255, 255, 0.3); }
+.ap-planner .ap-now-marker.is-out-of-range span {
+  color: var(--text-secondary);
+  border-color: var(--border-default);
+  background: rgba(9, 9, 11, 0.6);
+  box-shadow: none;
+}
+
+/* drag & drop individual: la tarea entera es el agarre */
+.ap-planner .ap-task[draggable="true"] { cursor: grab; }
+.ap-planner .ap-task.is-dragging { opacity: 0.45; }
+
+@media (max-width: 760px) {
+  .ap-planner .ap-days-row { flex-wrap: wrap; }
+  .ap-planner .ap-day-chip { min-width: 42px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ap-planner .ap-now-marker::before { animation: none; }
+}

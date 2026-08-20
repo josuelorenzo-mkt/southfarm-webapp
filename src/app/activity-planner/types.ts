@@ -35,12 +35,20 @@ export type RoutineType = "warmup_daily" | "scan_auto" | "publishing";
 
 export type RoutineStatus = "approved" | "editing" | "paused";
 
-/** Config según routine_type (contrato sección "Config por routine_type"). */
+/** Config según routine_type (contrato sección "Config por routine_type" + Extensiones v3).
+ *  Campos v3 retrocompatibles: si faltan, el frontend usa los defaults del contrato. */
 export interface RoutineConfig {
+  /** v1: minutos de warmup POR CUENTA POR DÍA. */
   minMinutes?: number;
+  /** v3: en cuántas sesiones se reparten los minutos (1–4). Default 2. */
+  sessionsPerDay?: number;
+  /** v3: separación máxima entre sesiones consecutivas en horas (1–10). Default 4. */
+  maxGapHours?: number;
   timesPerDay?: number;
   minGapHours?: number;
   postsPerWeek?: number;
+  /** v3: días de la semana elegidos para publicar (1=lun … 7=dom, ISO). Default [2,4]. */
+  days?: number[];
 }
 
 export interface Routine {
@@ -56,6 +64,15 @@ export interface ClusterAccount {
   username: string;
   deviceAlias: string | null;
   policyStatus: string | null;
+}
+
+/** Serie de warmup POR CUENTA (extensión v3 de GET /api/clusters/:id → history). */
+export interface AccountWarmup {
+  accountId: number;
+  username: string;
+  platform: PlannerPlatform;
+  /** 14 días, minutos ejecutados. */
+  warmupByDay: number[];
 }
 
 export interface WeekTask {
@@ -164,6 +181,9 @@ export interface ClusterHistory {
   warmupByDay: number[];
   /** 14 días. */
   postsByDay: number[];
+  /** Warmup por cuenta (extensión v3). Opcional por retrocompatibilidad: si no
+   *  viene, el detalle cae al agregado warmupByDay. */
+  accountsWarmup?: AccountWarmup[];
   stats: {
     warmupMinutes30d: number;
     posts30d: number;
@@ -208,8 +228,17 @@ export interface PublishToClusterBody {
   scheduledFor?: string;
 }
 
+/** Publicación v3: multipart/form-data con archivo (video) + título (+ fecha opcional). */
+export interface PublishToClusterFileBody {
+  file: File;
+  title: string;
+  scheduledFor?: string;
+}
+
 export interface PublishToClusterResponse {
   created: number;
+  /** v3: id del asset subido (el body JSON legacy no lo trae). */
+  assetId?: string;
 }
 
 /* ============================================================

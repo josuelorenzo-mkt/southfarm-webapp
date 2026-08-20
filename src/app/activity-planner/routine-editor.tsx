@@ -5,6 +5,15 @@
  * Porte de docs/mockups/activity-planner/routine-editor.html con datos reales
  * de GET /api/clusters/:id/routines y PUT /api/clusters/:id/routines/:routineId.
  *
+ * v3 (2026-08-20): cards ricas —
+ * - Warmup diario: minMinutes + sesiones por día (1–4) + separación máxima
+ *   entre sesiones (1–10 h, default 4) → config {minMinutes, sessionsPerDay, maxGapHours}.
+ * - Publicaciones: postsPorSemana + day-chips L M M J V S D (1=lun…7=dom, ISO)
+ *   → config {postsPerWeek, days}.
+ * - Scan automático sin cambios (timesPerDay + minGapHours).
+ * - Publicación de cluster con dropzone de ARCHIVO (video) en vez de URL:
+ *   multipart/form-data vía plannerApi.publishToClusterWithFile.
+ *
  * Ciclo de vida (sección 4.3 del plan — feedback del dueño 2026-08-19):
  * - Editar cualquier parámetro → el toggle salta solo a "Editando"
  *   (PUT con solo config; el backend fuerza editing; NO toca el plan).
@@ -15,39 +24,45 @@
  */
 import "./planner-extra.css";
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { CSSProperties } from "react";
+import type { CSSProperties, ReactElement, ReactNode } from "react";
 import { getActiveAccessToken } from "../auth-client";
 import { plannerApi, PlannerApiError } from "./api";
 import { ROUTINE_LABELS, ROUTINE_STATUS_LABELS } from "./types";
 import type { Routine, RoutineConfig, RoutineStatus, RoutineType } from "./types";
 
-/* Parámetros por tipo de rutina: [key, label, min, max, step, unidad] */
-const ROUTINE_PARAMS: Record<RoutineType, Array<{
-  key: keyof RoutineConfig;
-  label: string;
-  min: number;
-  max: number;
-  step: number;
-  unit: string;
-  hint: string;
-}>> = {
-  warmup_daily: [
-    { key: "minMinutes", label: "Mínimo por cuenta / día", min: 20, max: 90, step: 5, unit: "min", hint: "El planificador reparte el total en 2–3 sesiones por cuenta." },
-  ],
-  scan_auto: [
-    { key: "timesPerDay", label: "Frecuencia diaria", min: 1, max: 4, step: 1, unit: "veces/día", hint: "Ejemplo generado: 13:00 y 22:00 (separación de 9 h o más)." },
-    { key: "minGapHours", label: "Separación mínima", min: 4, max: 16, step: 1, unit: "horas", hint: "Evita dos scans seguidos sobre el mismo teléfono." },
-  ],
-  publishing: [
-    { key: "postsPerWeek", label: "Mínimo por cuenta / semana", min: 1, max: 7, step: 1, unit: "videos", hint: "Sin video en cola el día asignado, la tarea queda en atrasada y avisa." },
-  ],
+/* ============================================================
+   Constantes v3 (porte del mockup routine-editor.html)
+   ============================================================ */
+
+const ROUTINE_GLYPH: Record<RoutineType, ReactNode> = {
+  warmup_daily: (
+    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><path d="M4 15a8 8 0 0 1 16 0" /><path d="M12 15l3.5-3.5" /><circle cx="12" cy="15" r="1.6" /></svg>
+  ),
+  scan_auto: (
+    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><circle cx="10.5" cy="10.5" r="6.5" /><path d="m20 20-4.8-4.8" /></svg>
+  ),
+  publishing: (
+    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="6" width="18" height="13" rx="3" /><path d="m10.5 9.5 5 3-5 3z" /></svg>
+  ),
 };
 
-const ROUTINE_GLYPH: Record<RoutineType, string> = {
-  warmup_daily: "◌",
-  scan_auto: "◎",
-  publishing: "▶",
-};
+/** Sesiones por día: 1–4, un valor exacto (no es un rango). */
+const SESSION_OPTIONS: Array<{ value: number; sub: string }> = [
+  { value: 1, sub: "bloque largo" },
+  { value: 2, sub: "natural" },
+  { value: 3, sub: "repartido" },
+  { value: 4, sub: "muy activo" },
+];
+
+/** Day-chips L M M J V S D (1=lun … 7=dom, estilo ISO del contrato). */
+const PUB_DAY_LABELS = ["L", "M", "M", "J", "V", "S", "D"];
+const PUB_DAY_NAMES = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"];
+const PUB_DAY_SHORT = ["lun", "mar", "mié", "jue", "vie", "sáb", "dom"];
+
+/** Defaults del contrato (Extensiones v3 — campos nuevos retrocompatibles). */
+const WARMUP_DEFAULTS = { minMinutes: 40, sessionsPerDay: 2, maxGapHours: 4 };
+const SCAN_DEFAULTS = { timesPerDay: 2, minGapHours: 9 };
+const PUBLISHING_DEFAULTS = { postsPerWeek: 2, days: [2, 4] as number[] };
 
 const STATUS_ORDER: RoutineStatus[] = ["approved", "editing", "paused"];
 
@@ -67,11 +82,112 @@ function PauseIcon() {
   );
 }
 
-const STATUS_ICON: Record<RoutineStatus, () => React.ReactElement> = {
+const STATUS_ICON: Record<RoutineStatus, () => ReactElement> = {
   approved: CheckIcon,
   editing: PencilIcon,
   paused: PauseIcon,
 };
+
+/** "mar y jue" / "ninguno" a partir del array de días 1..7. */
+function daysLabel(days: number[]): string {
+  const names = days.map((day) => PUB_DAY_SHORT[(day - 1 + 7) % 7]);
+  if (!names.length) return "ninguno";
+  if (names.length === 1) return names[0];
+  if (names.length === 2) return names.join(" y ");
+  return `${names.slice(0, -1).join(", ")} y ${names[names.length - 1]}`;
+}
+
+/* ============================================================
+   Bloques de control por tipo de rutina
+   ============================================================ */
+
+function RuleBox({ label, children, hint }: { label: ReactNode; children: ReactNode; hint?: ReactNode }) {
+  return (
+    <div className="ap-rule-box">
+      <span>{label}</span>
+      {children}
+      {hint ? <span className="ap-hint">{hint}</span> : null}
+    </div>
+  );
+}
+
+function SliderRow({
+  value, min, max, step, unit, disabled, ariaLabel, onInput,
+}: {
+  value: number; min: number; max: number; step: number; unit: string;
+  disabled: boolean; ariaLabel: string; onInput: (next: number) => void;
+}) {
+  const fill = ((value - min) / (max - min)) * 100;
+  return (
+    <div className="ap-slider-row">
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step={step}
+        value={value}
+        disabled={disabled}
+        aria-label={ariaLabel}
+        style={{ "--fill": `${fill}%` } as CSSProperties}
+        onChange={(event) => onInput(Number(event.target.value))}
+      />
+      <output>
+        {value} <small>{unit}</small>
+      </output>
+    </div>
+  );
+}
+
+/** Sesiones por día: 1–4, un valor exacto (no es un rango). */
+function SessChips({ value, disabled, onSelect }: { value: number; disabled: boolean; onSelect: (n: number) => void }) {
+  return (
+    <div className="ap-sess-chips" role="group" aria-label="Cantidad de sesiones de warmup por día">
+      {SESSION_OPTIONS.map((option) => (
+        <button
+          key={option.value}
+          type="button"
+          className={`ap-sess-chip ${value === option.value ? "is-on" : ""}`}
+          aria-pressed={value === option.value}
+          disabled={disabled}
+          onClick={() => onSelect(option.value)}
+        >
+          {option.value}
+          <small>{option.sub}</small>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** Day-chips de publicación: selección múltiple, 1=lun … 7=dom. */
+function DayChips({ selected, disabled, onToggle }: { selected: number[]; disabled: boolean; onToggle: (day: number) => void }) {
+  return (
+    <div className="ap-days-row" role="group" aria-label="Días de publicación">
+      {PUB_DAY_LABELS.map((label, index) => {
+        const day = index + 1;
+        const on = selected.includes(day);
+        return (
+          <button
+            key={day}
+            type="button"
+            className={`ap-day-chip ${on ? "is-on" : ""}`}
+            aria-pressed={on}
+            aria-label={PUB_DAY_NAMES[index]}
+            title={PUB_DAY_NAMES[index]}
+            disabled={disabled}
+            onClick={() => onToggle(day)}
+          >
+            {label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/* ============================================================
+   Editor principal
+   ============================================================ */
 
 export default function RoutineEditor({
   clusterId,
@@ -100,8 +216,10 @@ export default function RoutineEditor({
   const [applying, setApplying] = useState<Record<number, boolean>>({});
   /** Cartel transitorio "Cambios aplicados" (2.5s). */
   const [appliedNotice, setAppliedNotice] = useState("");
-  /** Formulario de publicación de cluster (C1). */
-  const [videoUrl, setVideoUrl] = useState("");
+  /** Formulario de publicación de cluster (C1): archivo + título + fecha/hora opcional. */
+  const [videoFile, setVideoFile] = useState<File | null>(null);
+  const [dragOver, setDragOver] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [title, setTitle] = useState("");
   const [scheduledDate, setScheduledDate] = useState("");
   const [scheduledTime, setScheduledTime] = useState("");
@@ -211,10 +329,18 @@ export default function RoutineEditor({
     showApplied("podés editar la rutina");
   }, [patchRoutine, showApplied]);
 
-  /* C1: publicar al cluster desde la sección del editor (mismo contrato que el modal del detalle). */
+  /* C1: aceptar archivo desde la dropzone (drag & drop o file input). */
+  const acceptFile = useCallback((file: File | null | undefined) => {
+    if (!file) { showToast("No se pudo leer el archivo.", true); return; }
+    if (!file.type.startsWith("video/")) { showToast("El archivo tiene que ser un video (MP4, MOV…).", true); return; }
+    setVideoFile(file);
+    const mb = (file.size / (1024 * 1024)).toFixed(1).replace(".", ",");
+    showToast(`Video cargado: ${file.name} · ${mb} MB`);
+  }, [showToast]);
+
+  /* C1: publicar al cluster con archivo (v3 — multipart/form-data). */
   const submitPublish = useCallback(async () => {
-    const cleanUrl = videoUrl.trim();
-    if (!cleanUrl) { showToast("Ingresá la URL del video.", true); return; }
+    if (!videoFile) { showToast("Elegí el video para publicar.", true); return; }
     const cleanTitle = title.trim();
     if (!cleanTitle) { showToast("Ingresá el título de la publicación.", true); return; }
     setPublishing(true);
@@ -224,12 +350,12 @@ export default function RoutineEditor({
       const scheduledFor = (scheduledDate && scheduledTime)
         ? new Date(`${scheduledDate}T${scheduledTime}:00-03:00`).toISOString()
         : undefined;
-      const result = await plannerApi.publishToCluster(token, clusterId, {
-        videoUrl: cleanUrl,
+      const result = await plannerApi.publishToClusterWithFile(token, clusterId, {
+        file: videoFile,
         title: cleanTitle,
         scheduledFor,
       });
-      setVideoUrl("");
+      setVideoFile(null);
       setTitle("");
       setScheduledDate("");
       setScheduledTime("");
@@ -239,7 +365,7 @@ export default function RoutineEditor({
     } finally {
       setPublishing(false);
     }
-  }, [clusterId, videoUrl, title, scheduledDate, scheduledTime, showToast]);
+  }, [clusterId, videoFile, title, scheduledDate, scheduledTime, showToast]);
 
   return (
     <div className="ap-page-stack">
@@ -278,11 +404,11 @@ export default function RoutineEditor({
         <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
           {routines.length ? routines.map((routine) => {
             const meta = ROUTINE_LABELS[routine.routineType] || { title: routine.routineType, desc: "", color: "var(--text-secondary)" };
-            const params = ROUTINE_PARAMS[routine.routineType] || [];
             const paused = routine.status === "paused";
             const isBusy = Boolean(busy[routine.id]);
             const isApplying = Boolean(applying[routine.id]);
             const currentError = cardError[routine.id];
+            const controlsDisabled = paused || isBusy || isApplying;
 
             return (
               <section
@@ -342,37 +468,120 @@ export default function RoutineEditor({
                   {isBusy && <span className="ap-saving-label" role="status">Guardando…</span>}
                   {currentError && <div className="ap-inline-error" role="alert">{currentError}</div>}
 
-                  <div className="ap-rule-grid">
-                    {params.map((param) => {
-                      const value = routine.config[param.key] ?? param.min;
-                      const fill = ((value - param.min) / (param.max - param.min)) * 100;
-                      return (
-                        <div className="ap-rule-box" key={String(param.key)}>
-                          <span>{param.label}</span>
-                          <div className="ap-slider-row">
-                            <input
-                              type="range"
-                              min={param.min}
-                              max={param.max}
-                              step={param.step}
-                              value={value}
-                              disabled={paused || isBusy}
-                              aria-label={`${param.label} — ${ROUTINE_STATUS_LABELS[routine.status]}`}
-                              style={{ "--fill": `${fill}%` } as CSSProperties}
-                              onChange={(event) => {
-                                const next = Number(event.target.value);
-                                void handleConfigEdit(routine, { [param.key]: next });
-                              }}
+                  {routine.routineType === "warmup_daily" && (() => {
+                    const config = routine.config;
+                    const minMinutes = config.minMinutes ?? WARMUP_DEFAULTS.minMinutes;
+                    const sessionsPerDay = config.sessionsPerDay ?? WARMUP_DEFAULTS.sessionsPerDay;
+                    const maxGapHours = config.maxGapHours ?? WARMUP_DEFAULTS.maxGapHours;
+                    return (
+                      <>
+                        <div className="ap-rule-grid">
+                          <RuleBox label="Mínimo por cuenta / día" hint="El planificador reparte estos minutos en las sesiones de abajo.">
+                            <SliderRow
+                              value={minMinutes}
+                              min={20}
+                              max={90}
+                              step={5}
+                              unit="min"
+                              disabled={controlsDisabled}
+                              ariaLabel="Minutos mínimos de warmup por cuenta por día"
+                              onInput={(next) => void handleConfigEdit(routine, { minMinutes: next })}
                             />
-                            <output>
-                              {value} <small>{param.unit}</small>
-                            </output>
-                          </div>
-                          <span className="ap-hint">{param.hint}</span>
+                          </RuleBox>
+                          <RuleBox label="Separación máxima entre sesiones" hint={<>Si puede, el sistema deja menos de <strong>{maxGapHours} h</strong> entre sesión y sesión (mínimo 30 min).</>}>
+                            <SliderRow
+                              value={maxGapHours}
+                              min={1}
+                              max={10}
+                              step={1}
+                              unit="horas"
+                              disabled={controlsDisabled}
+                              ariaLabel="Separación máxima entre sesiones de warmup en horas"
+                              onInput={(next) => void handleConfigEdit(routine, { maxGapHours: next })}
+                            />
+                          </RuleBox>
                         </div>
-                      );
-                    })}
-                  </div>
+                        <RuleBox label={<>Sesiones por día <em style={{ fontStyle: "normal", color: "var(--text-dim)" }}>— ¿en cuántas se reparten los minutos?</em></>} hint="Más sesiones = bloques más cortos, actividad más repartida y natural.">
+                          <SessChips
+                            value={sessionsPerDay}
+                            disabled={controlsDisabled}
+                            onSelect={(next) => { if (next !== sessionsPerDay) void handleConfigEdit(routine, { sessionsPerDay: next }); }}
+                          />
+                        </RuleBox>
+                        <p className="ap-rule-summary" role="status">
+                          <span>{minMinutes} min en {sessionsPerDay} sesión{sessionsPerDay === 1 ? "" : "es"} · gap máx {maxGapHours} h</span>
+                        </p>
+                      </>
+                    );
+                  })()}
+
+                  {routine.routineType === "scan_auto" && (() => {
+                    const config = routine.config;
+                    const timesPerDay = config.timesPerDay ?? SCAN_DEFAULTS.timesPerDay;
+                    const minGapHours = config.minGapHours ?? SCAN_DEFAULTS.minGapHours;
+                    return (
+                      <div className="ap-rule-grid">
+                        <RuleBox label="Frecuencia diaria" hint="Ejemplo generado: 13:00 y 22:00 (separación de 9 h o más).">
+                          <SliderRow
+                            value={timesPerDay}
+                            min={1}
+                            max={4}
+                            step={1}
+                            unit="veces/día"
+                            disabled={controlsDisabled}
+                            ariaLabel="Cantidad de scans por día"
+                            onInput={(next) => void handleConfigEdit(routine, { timesPerDay: next })}
+                          />
+                        </RuleBox>
+                        <RuleBox label="Separación mínima" hint="Evita dos scans seguidos sobre el mismo teléfono.">
+                          <SliderRow
+                            value={minGapHours}
+                            min={4}
+                            max={16}
+                            step={1}
+                            unit="horas"
+                            disabled={controlsDisabled}
+                            ariaLabel="Separación mínima entre scans en horas"
+                            onInput={(next) => void handleConfigEdit(routine, { minGapHours: next })}
+                          />
+                        </RuleBox>
+                      </div>
+                    );
+                  })()}
+
+                  {routine.routineType === "publishing" && (() => {
+                    const config = routine.config;
+                    const postsPerWeek = config.postsPerWeek ?? PUBLISHING_DEFAULTS.postsPerWeek;
+                    const days = (config.days && config.days.length ? config.days : PUBLISHING_DEFAULTS.days);
+                    return (
+                      <div className="ap-rule-grid">
+                        <RuleBox label="Posts por cuenta / semana" hint="Si hay menos días elegidos que posts, el sistema rota los días.">
+                          <SliderRow
+                            value={postsPerWeek}
+                            min={1}
+                            max={7}
+                            step={1}
+                            unit="videos"
+                            disabled={controlsDisabled}
+                            ariaLabel="Cantidad de videos por cuenta por semana"
+                            onInput={(next) => void handleConfigEdit(routine, { postsPerWeek: next })}
+                          />
+                        </RuleBox>
+                        <RuleBox label="Días de publicación" hint={<>Los posts caen en los días elegidos (ahora: <strong>{daysLabel(days)}</strong> · 16:00 BA).</>}>
+                          <DayChips
+                            selected={days}
+                            disabled={controlsDisabled}
+                            onToggle={(day) => {
+                              const next = days.includes(day)
+                                ? days.filter((d) => d !== day)
+                                : [...days, day].sort((a, b) => a - b);
+                              void handleConfigEdit(routine, { days: next });
+                            }}
+                          />
+                        </RuleBox>
+                      </div>
+                    );
+                  })()}
                 </div>
               </section>
             );
@@ -382,31 +591,91 @@ export default function RoutineEditor({
         </div>
       )}
 
-      {/* C1: Publicación de Cluster — mismo formulario que el modal del detalle. */}
+      {/* C1: Publicación de Cluster — dropzone de archivo (v3) en vez de URL. */}
       <section
         id="ap-publicacion-cluster"
-        className="ap-card"
+        className="ap-card ap-cluster-pub"
         aria-label="Publicación de cluster"
-        style={{ borderColor: "rgba(192, 38, 211, 0.22)", scrollMarginTop: 24 }}
+        style={{ scrollMarginTop: 24 }}
       >
         <div className="ap-card-heading">
           <div>
             <p className="ap-eyebrow ap-eyebrow-accent">PUBLICAR AL CLUSTER</p>
             <h3>Publicación de Cluster</h3>
-            <p className="ap-card-subtitle">Programá un video para todas las cuentas del cluster ({routines.length ? "rutinas arriba" : "sin rutinas"}).</p>
+            <p className="ap-card-subtitle">Un mismo video + título publicado en todas las cuentas del cluster a la hora que elijas.</p>
           </div>
         </div>
         <div className="ap-modal-body" style={{ padding: 0, paddingTop: 4 }}>
-          <label className="ap-field">
-            <span>URL del video <em>— mismo video para todas las cuentas</em></span>
-            <input
-              className="ap-input"
-              type="url"
-              value={videoUrl}
-              placeholder="https://…"
-              onChange={(event) => setVideoUrl(event.target.value)}
-            />
-          </label>
+          <div aria-live="polite">
+            {videoFile ? (
+              <div className="ap-uploaded">
+                <div className="ap-up-thumb">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.5v13l11-6.5z" /></svg>
+                  <span>VIDEO</span>
+                </div>
+                <div className="ap-up-main">
+                  <strong>{videoFile.name}</strong>
+                  <span>{(videoFile.size / (1024 * 1024)).toFixed(1).replace(".", ",")} MB · listo para subir</span>
+                  <small>Se sube una vez y se publica en todas las cuentas del cluster</small>
+                </div>
+                <button
+                  type="button"
+                  className="ap-up-remove"
+                  aria-label="Quitar archivo cargado"
+                  title="Quitar archivo"
+                  onClick={() => {
+                    setVideoFile(null);
+                    showToast("Video quitado — la publicación quedó sin archivo.", true);
+                  }}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18M6 6l12 12" /></svg>
+                </button>
+              </div>
+            ) : (
+              <div
+                className={`ap-dropzone ${dragOver ? "is-over" : ""}`}
+                role="button"
+                tabIndex={0}
+                aria-label="Subir video para la publicación de cluster"
+                onClick={() => fileInputRef.current?.click()}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    fileInputRef.current?.click();
+                  }
+                }}
+                onDragOver={(event) => { event.preventDefault(); setDragOver(true); }}
+                onDragEnter={(event) => { event.preventDefault(); setDragOver(true); }}
+                onDragLeave={(event) => {
+                  if (event.currentTarget.contains(event.relatedTarget as Node)) return;
+                  setDragOver(false);
+                }}
+                onDrop={(event) => {
+                  event.preventDefault();
+                  setDragOver(false);
+                  acceptFile(event.dataTransfer.files?.[0]);
+                }}
+              >
+                <span className="ap-drop-icon">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><path d="M12 15V4M7.5 8.5 12 4l4.5 4.5" /><path d="M4 15v3.5A1.5 1.5 0 0 0 5.5 20h13a1.5 1.5 0 0 0 1.5-1.5V15" /></svg>
+                </span>
+                <strong>Arrastrá el video acá o hacé click para elegirlo del dispositivo</strong>
+                <small>Video (MP4, MOV…) · se sube una vez y se publica en todas las cuentas del cluster</small>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="video/*"
+                  style={{ display: "none" }}
+                  aria-hidden="true"
+                  tabIndex={-1}
+                  onChange={(event) => {
+                    acceptFile(event.target.files?.[0] ?? null);
+                    event.target.value = "";
+                  }}
+                />
+              </div>
+            )}
+          </div>
           <label className="ap-field">
             <span>Título de la publicación <em>— igual para todas las cuentas</em></span>
             <input
@@ -444,7 +713,7 @@ export default function RoutineEditor({
         <div className="ap-modal-foot" style={{ padding: "14px 0 0", borderTop: "1px solid var(--border-subtle)" }}>
           <button
             className="ap-btn ap-btn-primary ap-btn-sm"
-            disabled={publishing || !videoUrl.trim() || !title.trim()}
+            disabled={publishing || !videoFile || !title.trim()}
             onClick={() => void submitPublish()}
           >
             {publishing ? "Programando…" : "Programar publicación"}

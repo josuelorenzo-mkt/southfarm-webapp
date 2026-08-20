@@ -317,7 +317,9 @@ interface RowProps {
 function ClusterRow({ cluster, weekStart, weekDays, todayIndex, nowRatio, canManage, actionBusy, onOpenCluster, onOpenDay, onConfirmCluster, onRejectCluster, onMoveTask, onCancelTask }: RowProps) {
   const [metric, setMetric] = useState<MetricKey>("warmup");
 
-  const dayTasks: DayTaskInfo[] = useMemo(() => cluster.tasks.map((task) => {
+  const dayTasks: DayTaskInfo[] = useMemo(() => cluster.tasks
+    .filter((task) => task.status !== "cancelled")
+    .map((task) => {
     const dateKey = task.scheduledFor ? baDateKeyOf(task.scheduledFor) : "";
     return {
       task,

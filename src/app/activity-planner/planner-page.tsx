@@ -18,7 +18,6 @@ import {
   formatBATime,
   relativeBA,
   shiftDateKey,
-  shortDate,
 } from "./types";
 import type { DayResponse, WeekResponse } from "./types";
 
@@ -189,24 +188,8 @@ export default function PlannerPage({ token, canManage }: PlannerPageProps) {
             </div>
           </section>
         )}
-        {view === "day" && (
-          <section className="ap-day-head">
-            <div>
-              <p className="ap-eyebrow ap-eyebrow-accent">CALENDARIO DEL DÍA</p>
-              <h2>El día, <em>tarea por tarea.</em></h2>
-              <p>12:00–22:00 de Buenos Aires · un teléfono ejecuta una tarea a la vez.</p>
-            </div>
-            <div className="ap-day-controls">
-              <div className="ap-week-range">
-                <button title="Día anterior" aria-label="Día anterior" onClick={() => navigateDay(-1)}><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6" /></svg></button>
-                <span>{shortDate(dayDate)}</span>
-                <button title="Día siguiente" aria-label="Día siguiente" onClick={() => navigateDay(1)}><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6-6-6" /></svg></button>
-              </div>
-              <button className="ap-btn" onClick={goToToday}>Ahora</button>
-              <button className="ap-btn ap-btn-ghost" onClick={() => setView("week")}>Volver a la semana</button>
-            </div>
-          </section>
-        )}
+        {/* La vista día lleva su propio header (ap-day-head) dentro de DayView:
+            no se repite acá para evitar el título duplicado (fix v3). */}
 
         {/* Barra de estado */}
         <div className="ap-week-controls" style={{ justifyContent: "space-between" }}>
@@ -298,6 +281,7 @@ export default function PlannerPage({ token, canManage }: PlannerPageProps) {
               onBackToWeek={() => setView("week")}
               onPrevDay={() => navigateDay(-1)}
               onNextDay={() => navigateDay(1)}
+              onGoToToday={goToToday}
               onChanged={() => void loadDay(dayDate, true)}
             />
           ) : (
