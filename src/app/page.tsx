@@ -6,6 +6,7 @@ import QRCode from "qrcode";
 import { SchedulerPanel } from "./scheduler-panel";
 import { AuthApiError, authRequest, clearSession, persistSession } from "./auth-client";
 import { PublicationPanel } from "./publication-panel";
+import ActivityPlannerPage from "./activity-planner/planner-page";
 
 const API = (process.env.NEXT_PUBLIC_API_URL || "https://api.southfarm.tech").replace(/\/$/, "");
 
@@ -27,7 +28,7 @@ const INITIAL_API_HEALTH: ApiHealth = { state: "checking", checkedAt: null };
 
 type Role = "owner" | "admin" | "operator" | "viewer";
 type Platform = "instagram" | "tiktok" | "youtube";
-type Page = "overview" | "publish" | "fleet" | "accounts" | "history" | "team" | "settings";
+type Page = "overview" | "publish" | "fleet" | "planner" | "accounts" | "history" | "team" | "settings";
 type TaskMode = "warmup" | "scan";
 
 interface User {
@@ -171,10 +172,17 @@ const PLATFORMS: Array<{ id: Platform; label: string; short: string; color: stri
   { id: "youtube", label: "YouTube Shorts", short: "YT", color: "#fb7185" },
 ];
 
-const PAGES: Array<{ id: Page; label: string; glyph: string }> = [
+const PAGES: Array<{ id: Page; label: string; glyph: ReactNode }> = [
   { id: "overview", label: "Command center", glyph: "⌂" },
   { id: "publish", label: "Crear publicación", glyph: "＋" },
   { id: "fleet", label: "Device fleet", glyph: "▣" },
+  {
+    id: "planner",
+    label: "Activity Planner",
+    glyph: (
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="3.5" y="4.5" width="17" height="16" rx="2.5" /><path d="M3.5 9.5h17M8 3v3M16 3v3" /><path d="m9 15 2 2 4-4.5" /></svg>
+    ),
+  },
   { id: "accounts", label: "Warmup planner", glyph: "◎" },
   { id: "history", label: "Activity history", glyph: "◷" },
   { id: "team", label: "Team & roles", glyph: "♙" },
@@ -423,7 +431,7 @@ function Sidebar({ page, user, health, onNavigate, onLogout }: { page: Page; use
       <nav className="cc-side-nav">
         <p className="cc-nav-caption">WORKSPACE</p>
         {PAGES.map((item) => (
-          <button key={item.id} className={`cc-nav-item ${page === item.id ? "is-active" : ""}`} onClick={() => onNavigate(item.id)}><Glyph>{item.glyph}</Glyph><span>{item.label}</span>{item.id === "team" && (user.role === "owner" || user.role === "admin") && <b>RBAC</b>}</button>
+          <button key={item.id} className={`cc-nav-item ${page === item.id ? "is-active" : ""}`} onClick={() => onNavigate(item.id)}><Glyph>{item.glyph}</Glyph><span>{item.label}</span>{item.id === "planner" && <b>NEW</b>}{item.id === "team" && (user.role === "owner" || user.role === "admin") && <b>RBAC</b>}</button>
         ))}
       </nav>
       <div className="cc-sidebar-bottom">
@@ -819,9 +827,11 @@ export default function Home() {
     ? <DashboardPage devices={devices} accounts={accounts} runs={runs} sessions={sessions} scans={scans} stats={stats} health={apiHealth} onNavigate={setPage} />
     : page === "publish"
       ? <PublicationPanel token={token} devices={devices} accounts={accounts} canManage={user.role !== "viewer"} />
-    : page === "fleet"
-      ? <FleetPage devices={devices} accounts={accounts} runs={runs} token={token} onChanged={() => void refresh(token)} canManageDevices={user.role === "owner" || user.role === "admin"} canRunTasks={user.role !== "viewer"} />
-      : page === "accounts"
+      : page === "fleet"
+        ? <FleetPage devices={devices} accounts={accounts} runs={runs} token={token} onChanged={() => void refresh(token)} canManageDevices={user.role === "owner" || user.role === "admin"} canRunTasks={user.role !== "viewer"} />
+      : page === "planner"
+        ? <ActivityPlannerPage token={token} canManage={user.role !== "viewer"} />
+        : page === "accounts"
          ? <AccountsPage accounts={accounts} devices={devices} token={token} onChanged={() => void refresh(token)} canManage={user.role !== "viewer"} />
         : page === "history"
           ? <HistoryPage sessions={sessions} scans={scans} />
