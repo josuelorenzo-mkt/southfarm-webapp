@@ -44,7 +44,7 @@ const KIND_LABEL: Record<"warmup" | "scan" | "publish", string> = {
 };
 
 /** Máximo de filas de tareas en el tooltip del chart; el resto se resume en "+N más". */
-const MAX_TIP_TASKS = 3;
+const MAX_TIP_TASKS = 2;
 /** Altura máxima estimada del tooltip (header + fila de métrica + hasta
     MAX_TIP_TASKS tareas + fila "+N más" + paddings). Se usa para decidir el
     flip vertical antes de que el DOM tenga el tooltip renderizado. */
@@ -421,11 +421,22 @@ function ClusterRow({ cluster, weekStart, weekDays, todayIndex, nowRatio, canMan
     <article
       className={`ap-cluster-row ${cluster.status === "suggested" ? "is-suggested" : ""} ${cluster.health === "deficit" ? "is-deficit" : ""} ${cluster.health === "paused" ? "is-paused" : ""}`}
     >
-      {/* v4 — contenedor del glow giratorio: clipea el disco rotante a la
-          forma de la card (overflow hidden acá, no en la fila, para no
-          recortar el tooltip del chart). ::before rota (transform),
-          ::after es la cubierta que deja ver solo el anillo del borde. */}
-      <div className="ap-cluster-glow" aria-hidden="true" />
+      {/* v5.1 — glow de borde en hover: SVG de trazo perimetral, correcto por
+          construcción (nada se pinta en el interior). Dos rects sin fill con
+          pathLength 100 y rx 13.5 (= border-radius 15 de la card − inset
+          1.5): la luz orbita a distancia constante también en las esquinas.
+          Cabeza nítida (ap-glow-line, dash "3 97") + cola difusa
+          (ap-glow-soft, dash "12 88") desfasadas 12 unidades: la cola queda
+          siempre detrás de la cabeza en sentido horario. Sin viewBox
+          (user units = px) y con width/height del rect en CSS (SVG2
+          geometry, Chromium): el inset de 1.5px y el rx quedan parejos en
+          cualquier aspect ratio de la card — con preserveAspectRatio="none"
+          el inset se escalaba por ancho y alto por separado y el trazo se
+          despegaba del borde. */}
+      <svg className="ap-cluster-glow" aria-hidden="true" focusable="false">
+        <rect className="ap-glow-soft" x="1.5" y="1.5" rx="13.5" pathLength="100" vectorEffect="non-scaling-stroke" />
+        <rect className="ap-glow-line" x="1.5" y="1.5" rx="13.5" pathLength="100" vectorEffect="non-scaling-stroke" />
+      </svg>
       <div
         className="ap-cluster-card"
         tabIndex={0}

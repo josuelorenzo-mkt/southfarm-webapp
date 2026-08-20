@@ -161,32 +161,42 @@
 }
 .ap-segmented button.is-selected { color: var(--text-primary); background: var(--bg-hover); box-shadow: var(--shadow-sm); }
 
-/* Progress — la barra de cumplimiento vive: un brillo angosto recorre la
-   barra de izquierda a derecha en loop de 2s (v4 — reemplaza la respiración
-   anterior por un barrido visible: la luz "resplandece por donde pasa").
-   El glow lo lleva el SPAN (la parte llena, con su width inline): por eso
-   el track no tiene overflow:hidden — recortaría el halo. El overlay ::after
-   se anima con translateX(-110% → 310%), así el barrido siempre parte del
-   borde izquierdo de la parte llena y sale por la derecha. */
+/* Progress — la barra de cumplimiento: un brillo angosto recorre la parte
+   llena de izquierda a derecha en loop de 2s. El span (la parte llena, con
+   su width inline) tiene overflow: hidden: el barrido queda CLIPEADO dentro
+   del relleno de color y nunca pisa el track gris ni sale de la barra.
+   El overlay ::after es una banda de 45% anclada a left: 0 que se anima con
+   translateX(-110% → 235%) (porcentajes relativos a su PROPIO ancho): parte
+   completamente oculta a la izquierda del relleno y sale completamente
+   oculta por la derecha. El pico del brillo está corrido al 62%: la luz
+   "llega y pasa" en vez de "aparecer" (sesgo direccional del cometa).
+   Cada fila desfasa su barrido con animation-delay negativo (abajo) para
+   no barrenar en lockstep. */
 .ap-progress-track { height: 4px; border-radius: 99px; background: rgba(255, 255, 255, 0.06); }
 .ap-progress-track span {
   position: relative;
   height: 100%; display: block; min-width: 10px; border-radius: inherit;
+  overflow: hidden;               /* el fix: clipea el barrido dentro del relleno */
   background: linear-gradient(90deg, #22c55e, #86efac);
 }
 .ap-progress-track span::after {
-  content: ""; position: absolute; inset: 0; border-radius: inherit;
-  /* Brillo angosto (~30% del ancho): transparente → blanco/verde tenue → transparente */
+  content: ""; position: absolute; top: 0; bottom: 0; left: 0; width: 45%;
+  /* Brillo angosto: transparente → blanco/verde tenue → transparente */
   background: linear-gradient(100deg,
-    transparent 0%,
-    rgba(255, 255, 255, 0) 18%,
-    rgba(187, 247, 208, 0.5) 48%,
-    rgba(255, 255, 255, 0) 78%,
-    transparent 100%);
+    rgba(255, 255, 255, 0) 0%,
+    rgba(255, 255, 255, 0) 22%,
+    rgba(236, 254, 243, 0.55) 62%,
+    rgba(255, 255, 255, 0) 84%,
+    rgba(255, 255, 255, 0) 100%);
   transform: translateX(-110%);
   animation: apBarSweep 2s linear infinite;
   pointer-events: none;
 }
+/* Desincronización entre filas (v5.1): delays negativos — las filas 2 y 3
+   arrancan ya desfazadas (-0.7s / -1.4s = tercios del ciclo de 2s), así las
+   cards no barren en lockstep (patrón plantilla). */
+.ap-cluster-stack .ap-cluster-row:nth-child(2) .ap-progress-track span::after { animation-delay: -0.7s; }
+.ap-cluster-stack .ap-cluster-row:nth-child(3) .ap-progress-track span::after { animation-delay: -1.4s; }
 
 /* Toast */
 .ap-toast {
@@ -299,77 +309,70 @@
 .ap-cluster-row:hover { border-color: var(--border-default); box-shadow: var(--shadow-md); }
 .ap-cluster-row:focus-within { border-color: rgba(34, 197, 94, 0.35); }
 
-/* Glow giratorio en hover (v4 — robusto): halo tenue que RECORRE el
-   perímetro de la card. Estructura clásica de "spinner de borde":
-   .ap-cluster-glow (mismo tamaño que la card, overflow hidden, z-index 0)
-   contiene el ::before, un DISCO conic-gradient 16px más grande que rota
-   con transform: rotate (animación del ELEMENTO, no de una custom property
-   — el giro se percibe en cualquier browser). La cubierta ::after (mismo
-   contorno de la card, inset 1.5px, mismas esquinas) tapa el centro del
-   disco: queda visible solo el ANILLO exterior de 1.5px sobre el borde de
-   la card. El glow NO depende de máscaras ni de @property: solo se rota el
-   pseudo-elemento. La "cabeza" de luz del gradiente nace en la esquina
-   superior izquierda y orbita. Fade-in de entrada + pausado sin glow. */
+/* Glow de borde en hover (v5.1 — SVG, correcto por construcción): el trazo
+   perimetral viaja por el borde de la card y NADA se pinta en el interior.
+   Estructura: .ap-cluster-glow es un SVG que cubre la card (inset 0,
+   z-index 0, sin viewBox → user units = px reales); sus dos rects
+   (x/y 1.5, sin width/height: los ponen las CSS geometry properties
+   width/height al 100% − 3px en .ap-cluster-glow rect, soportadas en
+   Chromium) dibujan SOLO sobre el perímetro, a 1.5px del borde. El rx es
+   13.5 (= border-radius 15 de la card − inset 1.5): la luz orbita a
+   distancia constante también en las 4 esquinas. Dos trazos con roles:
+   ap-glow-line es la CABEZA nítida (dash "3 97") y ap-glow-soft la COLA
+   difusa (dash "12 88"), desfasadas 12 unidades por su dashoffset inicial
+   (apGlowPerimeter va de 0 a −100; apGlowTail de +12 a −88): la cabeza
+   ocupa [s, s+3) y la cola [s−12, s) — contiguas, la cola siempre detrás
+   de la cabeza en sentido horario, ambas recorren 100 unidades por ciclo
+   (loop perfecto, 3.5s, linear — lee como presencia premium, no como
+   spinner). stroke-width constante vía vector-effect non-scaling-stroke.
+   Fade-in en hover + variantes de color por estado + pausado sin glow. */
 .ap-cluster-glow {
   position: absolute;
   inset: 0;
-  overflow: hidden;
-  border-radius: inherit;
-  opacity: 0;
-  transition: opacity 0.45s ease;
+  width: 100%;
+  height: 100%;
   pointer-events: none;
   z-index: 0;
+  overflow: visible;
+  opacity: 0;
+  transition: opacity 0.45s ease;
 }
 .ap-cluster-row:hover .ap-cluster-glow,
 .ap-cluster-row:focus-within .ap-cluster-glow {
   opacity: 1;
 }
-.ap-cluster-glow::before {
-  content: "";
-  position: absolute;
-  inset: -16px;
-  border-radius: 50%;
-  background: conic-gradient(from 100deg,
-    rgba(34, 197, 94, 0) 0deg,
-    rgba(34, 197, 94, 0.06) 30deg,
-    rgba(134, 239, 172, 0.1) 55deg,
-    rgba(34, 197, 94, 0.06) 80deg,
-    rgba(34, 197, 94, 0) 115deg,
-    rgba(34, 197, 94, 0) 360deg);
-  animation: apGlowOrbit 3s linear infinite;
+.ap-cluster-glow rect {
+  fill: none;
+  stroke-linecap: round;
+  /* Sin viewBox: user units = px. El inset de 1.5px y el rx quedan parejos
+     en cualquier aspect ratio de la card (con preserveAspectRatio="none" el
+     inset se escalaba por ancho/alto por separado y el trazo se despegaba
+     del borde). */
+  width: calc(100% - 3px);
+  height: calc(100% - 3px);
 }
-.ap-cluster-glow::after {
-  content: "";
-  position: absolute;
-  inset: 1.5px;
-  border-radius: inherit;
-  background: rgba(15, 15, 18, 0.92);
+/* Cabeza nítida (adelante en sentido horario) */
+.ap-glow-line {
+  stroke: #4ade80; stroke-width: 1.6;
+  stroke-dasharray: 3 97;
+  animation: apGlowPerimeter 3.5s linear infinite;
 }
+/* Cola difusa (detrás de la cabeza: dashoffset arranca en +12) */
+.ap-glow-soft {
+  stroke: #22c55e; stroke-width: 4;
+  opacity: 0.32; filter: blur(4px);
+  stroke-dasharray: 12 88;
+  animation: apGlowTail 3.5s linear infinite;
+}
+/* Variantes */
+.ap-cluster-row.is-suggested .ap-glow-soft { stroke: #8b5cf6; }
+.ap-cluster-row.is-suggested .ap-glow-line { stroke: #a78bfa; }
+.ap-cluster-row.is-deficit .ap-glow-soft { stroke: #f59e0b; }
+.ap-cluster-row.is-deficit .ap-glow-line { stroke: #fbbf24; }
 /* El contenido de la card queda por encima del halo (z-index 1). */
 .ap-cluster-row > *:not(.ap-cluster-glow) { position: relative; z-index: 1; }
 
 .ap-cluster-row.is-suggested { border-style: dashed; border-color: rgba(139, 92, 246, 0.38); background: rgba(24, 18, 32, 0.6); }
-/* El glow de borde no funciona sobre borde dashed — el sugerido mantiene su
-   identidad morada con un halo giratorio en su propio tono. */
-.ap-cluster-row.is-suggested .ap-cluster-glow::before {
-  background: conic-gradient(from 100deg,
-    rgba(139, 92, 246, 0) 0deg,
-    rgba(139, 92, 246, 0.07) 30deg,
-    rgba(196, 181, 253, 0.11) 55deg,
-    rgba(139, 92, 246, 0.07) 80deg,
-    rgba(139, 92, 246, 0) 115deg,
-    rgba(139, 92, 246, 0) 360deg);
-}
-/* Déficit: el halo gira en ámbar (coherente con el borde warn del row). */
-.ap-cluster-row.is-deficit .ap-cluster-glow::before {
-  background: conic-gradient(from 100deg,
-    rgba(245, 158, 11, 0) 0deg,
-    rgba(245, 158, 11, 0.07) 30deg,
-    rgba(251, 191, 36, 0.11) 55deg,
-    rgba(245, 158, 11, 0.07) 80deg,
-    rgba(245, 158, 11, 0) 115deg,
-    rgba(245, 158, 11, 0) 360deg);
-}
 /* Pausado: el cluster está dormido — sin glow en hover. */
 .ap-cluster-row.is-paused .ap-cluster-glow { opacity: 0; }
 .ap-cluster-row.is-paused { opacity: 0.75; }
@@ -412,6 +415,16 @@
 /* is-warn: la barra pasa a ámbar (el barrido se mantiene, mismo mecanismo) */
 .ap-compliance.is-warn .ap-progress-track span {
   background: linear-gradient(90deg, #f59e0b, #fbbf24);
+}
+/* is-warn: shimmer cálido sobre el relleno ámbar — el pico blanco-verdoso
+   del default desajusta; mismo pico corrido al 62% (sesgo direccional). */
+.ap-compliance.is-warn .ap-progress-track span::after {
+  background: linear-gradient(100deg,
+    transparent 0%,
+    transparent 22%,
+    rgba(254, 243, 199, 0.55) 62%,
+    transparent 84%,
+    transparent 100%);
 }
 
 /* Acciones sugeridas */
@@ -549,7 +562,7 @@
 .ap-chart-tip h5 { margin: 0; color: var(--text-primary); font-size: 11px; letter-spacing: -0.02em; }
 .ap-chart-tip h5 span { color: var(--text-muted); font-weight: 500; font-size: 10px; }
 /* El ul es la única parte que crece con las tareas: scroll con fade inferior
-   para que el tooltip nunca desborde el viewport (el cap de 3 tareas ya lo
+   para que el tooltip nunca desborde el viewport (el cap de 2 tareas ya lo
    contiene; el fade solo cubre el caso extremo). */
 .ap-chart-tip ul {
   margin: 8px 0 0; padding: 0; list-style: none;
@@ -809,21 +822,33 @@
 
 /* ============ Efectos premium ============ */
 
-/* Barrido de brillo de las barras de cumplimiento (v4): el overlay ::after
-   viaja de -110% (fuera por la izquierda) a 310% (fuera por la derecha) —
-   la luz "resplandece por donde pasa", loop de 2s. El color base de la barra
-   (verde/ámbar) lo pone el span; este keyframe solo mueve el overlay. */
+/* Barrido de brillo de las barras de cumplimiento: la banda ::after viaja de
+   -110% (oculta a la izquierda del relleno) a 235% (oculta a la derecha) —
+   porcentajes relativos a la propia banda (width 45%); combinado con
+   overflow: hidden del span, el brillo solo se ve sobre el relleno de color,
+   nunca sobre el track gris ni fuera de la barra. Loop de 2s. El color base
+   de la barra (verde/ámbar) lo pone el span; este keyframe solo mueve la
+   banda. */
 @keyframes apBarSweep {
   0% { transform: translateX(-110%); }
-  100% { transform: translateX(310%); }
+  100% { transform: translateX(235%); }
 }
-/* Glow giratorio del borde de la card (v4 — robusto): rota el ELEMENTO
-   ::before (disco conic-gradient), no una custom property: el giro se ve en
-   cualquier browser. ~3s por vuelta. El fade-in de entrada lo hace el
-   transition de opacity del ::before (ver .ap-cluster-row::before). */
-@keyframes apGlowOrbit {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
+/* Glow perimetral de la card (v5.1 — SVG): trazo que viaja por el borde;
+   nada se pinta en el interior. Barrer stroke-dashoffset de 0 a −100 mueve
+   la cabeza de luz en sentido horario (el dash sigue la dirección del path
+   del rect, que va en el sentido de las agujas del reloj), una vuelta cada
+   3.5s — lee como presencia premium, no como spinner. */
+@keyframes apGlowPerimeter {
+  from { stroke-dashoffset: 0; }
+  to   { stroke-dashoffset: -100; }
+}
+/* Cola del cometa (ap-glow-soft): arranca desfasada +12 respecto de la
+   cabeza (from 12 → to −88: también barre 100 unidades por ciclo, loop
+   perfecto). La cabeza ocupa [s, s+3) y la cola [s−12, s): contiguas, la
+   cola queda siempre detrás de la cabeza en sentido horario. */
+@keyframes apGlowTail {
+  from { stroke-dashoffset: 12; }
+  to   { stroke-dashoffset: -88; }
 }
 
 @media (prefers-reduced-motion: reduce) {
