@@ -18,6 +18,8 @@ import type {
   RoutinesResponse,
   ScanSuggestionsResponse,
   WeekResponse,
+  WorkspaceAccount,
+  WorkspaceDevice,
 } from "./types";
 
 export const PLANNER_API = (process.env.NEXT_PUBLIC_API_URL || "https://api.southfarm.tech").replace(/\/$/, "");
@@ -185,5 +187,15 @@ export const plannerApi = {
       method: "PATCH",
       body: JSON.stringify({}),
     });
+  },
+
+  /** GET /api/social-accounts?platform=all — todas las cuentas scaneadas del workspace. */
+  getWorkspaceAccounts(token: string): Promise<{ accounts: WorkspaceAccount[] }> {
+    return plannerRequest<{ accounts: WorkspaceAccount[] }>("/api/social-accounts?platform=all", token);
+  },
+
+  /** GET /api/devices — para resolver device_id → nombre/alias. */
+  getDevices(token: string): Promise<{ devices: WorkspaceDevice[] }> {
+    return plannerRequest<{ devices: WorkspaceDevice[] }>("/api/devices", token);
   },
 };

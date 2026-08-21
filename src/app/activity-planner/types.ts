@@ -64,6 +64,26 @@ export interface ClusterAccount {
   username: string;
   deviceAlias: string | null;
   policyStatus: string | null;
+  /** FIX 7 — la cuenta puede recibir tareas (su device está activo). */
+  deviceActive?: boolean;
+}
+
+/** Cuenta scaneada del workspace (GET /api/social-accounts) — solo lo que usa el picker. */
+export interface WorkspaceAccount {
+  id: number;
+  device_id: number;
+  platform: PlannerPlatform;
+  username: string;
+  display_name?: string | null;
+}
+/** Dispositivo del workspace (GET /api/devices) — para etiquetas "celular X". */
+export interface WorkspaceDevice {
+  id: number;
+  device_name: string | null;
+  alias?: string | null;
+  /** "active" | "revoked" — las cuentas en devices revocados no son
+   *  agrupables: el planner no genera tareas para ellos. */
+  lifecycle_status?: string | null;
 }
 
 /** Serie de warmup POR CUENTA (extensión v3 de GET /api/clusters/:id → history). */

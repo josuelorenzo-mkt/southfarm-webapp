@@ -8,6 +8,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AuthApiError } from "../auth-client";
 import { plannerApi, PlannerApiError } from "./api";
+import ClusterCreateModal from "./cluster-create-modal";
 import ClusterDetail from "./cluster-detail";
 import DayView from "./day-view";
 import PlannerWeek from "./planner-week";
@@ -40,12 +41,26 @@ export default function PlannerPage({ token, canManage }: PlannerPageProps) {
   const [error, setError] = useState("");
   const [generating, setGenerating] = useState(false);
   const [lastSync, setLastSync] = useState<string>("");
+  /** v6: modal "Crear cluster" (pick de cuentas scaneadas del workspace). */
+  const [createOpen, setCreateOpen] = useState(false);
   /** Flag one-shot: al abrir el editor de rutinas, scrollear a la sección de publicación de cluster. */
   const [autoScrollPublish, setAutoScrollPublish] = useState(false);
   const requestSeq = useRef(0);
 
   const weekDays = useMemo(() => Array.from({ length: 7 }, (_, i) => shiftDateKey(weekStart, i)), [weekStart]);
   const todayKey = useMemo(() => buenosAiresToday(), []);
+
+  /* v6: accountId → cluster que ya la agrupa (deshabilita la cuenta en el picker). */
+  const occupied = useMemo(() => {
+    const map = new Map<number, string>();
+    for (const cluster of week?.clusters ?? []) for (const account of cluster.accounts) map.set(account.id, cluster.name);
+    return map;
+  }, [week]);
+  /* v6: nombres de cluster existentes (lowercase) para bloquear duplicados. */
+  const existingNames = useMemo(
+    () => new Set((week?.clusters ?? []).map((cluster) => cluster.name.trim().toLowerCase())),
+    [week],
+  );
 
   const loadWeek = useCallback(async (start: string, silent = false) => {
     const seq = ++requestSeq.current;
@@ -148,6 +163,22 @@ export default function PlannerPage({ token, canManage }: PlannerPageProps) {
     }
   };
 
+  /** v6: el cluster ya quedó creado; se regenera la semana para que sus tareas
+   *  materialicen de inmediato y se recarga. Si la regeneración falla, el
+   *  cluster sigue creado — se puede regenerar a mano después. */
+  const handleClusterCreated = async () => {
+    setCreateOpen(false);
+    setGenerating(true);
+    try {
+      await plannerApi.generateWeek(token, weekStart);
+    } catch {
+      /* el cluster ya quedó creado; la semana se puede regenerar a mano */
+    } finally {
+      setGenerating(false);
+    }
+    await loadWeek(weekStart);
+  };
+
   const goToToday = () => {
     const todayWeek = currentWeekStart();
     if (view === "day") {
@@ -198,6 +229,16 @@ export default function PlannerPage({ token, canManage }: PlannerPageProps) {
             <span className="ap-last-sync" style={{ color: "var(--text-muted)", fontSize: 11 }}>Actualizado {lastSync ? relativeBA(lastSync) : "…"}</span>
           </div>
           <div className="ap-week-controls">
+            {view === "week" && (
+              <button
+                className="ap-btn ap-btn-primary"
+                onClick={() => setCreateOpen(true)}
+                disabled={!canManage}
+                title={!canManage ? "Solo lectura" : undefined}
+              >
+                Crear cluster<span>＋</span>
+              </button>
+            )}
             {view === "week" && (
               <button className="ap-btn" onClick={() => void regenerateWeek()} disabled={!canManage || generating}>
                 {generating ? "Regenerando…" : "Regenerar semana"}<span>↻</span>
@@ -309,6 +350,17 @@ export default function PlannerPage({ token, canManage }: PlannerPageProps) {
           />
         )}
       </div>
+
+      {/* v6: modal "Crear cluster" — vive dentro de .ap-planner porque
+          .ap-modal-overlay/.ap-modal están scoped bajo ese root. */}
+      <ClusterCreateModal
+        token={token}
+        open={createOpen}
+        onClose={() => setCreateOpen(false)}
+        onCreated={() => void handleClusterCreated()}
+        occupied={occupied}
+        existingNames={existingNames}
+      />
     </div>
   );
 }
