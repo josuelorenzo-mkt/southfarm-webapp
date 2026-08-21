@@ -27,6 +27,38 @@ export type PlannerTaskStatus =
 
 export type PlannerTaskSource = "automatic" | "manual" | string;
 
+/** Estado grueso de una publicación de la cola única (publication_jobs):
+ *  'running' cubre claimed/preparing/transferring/selecting_media/editing/
+ *  captioning/ready_to_publish/publishing/verifying. */
+export type PublicationStatus =
+  | "queued"
+  | "running"
+  | "completed"
+  | "failed"
+  | "cancelled"
+  | "review_required";
+
+/** Publicación de la cola única — shape compatible con GET
+ *  /api/planner/publications; GET /api/planner/week la expone por cluster
+ *  (cluster.publications) y GET /api/planner/day plana (day.publications). */
+export interface PublicationItem {
+  id: number;
+  clusterId: number | null;
+  clusterName: string | null;
+  title: string;
+  status: PublicationStatus;
+  job_status: string;
+  current_step: string | null;
+  scheduledFor: string | null;
+  platform: PlannerPlatform | null;
+  account: string;
+  assetUrl: string | null;
+  createdAt: string | null;
+  completedAt: string | null;
+  publishedAt: string | null;
+  source: string;
+}
+
 export type ClusterStatus = "confirmed" | "suggested";
 
 export type ClusterHealth = "ok" | "deficit" | "paused";
@@ -121,6 +153,8 @@ export interface WeekCluster {
     views: number[];
   };
   tasks: WeekTask[];
+  /** Cola única: publication_jobs del cluster dentro de la semana (single queue). */
+  publications: PublicationItem[];
 }
 
 export interface WeekSummary {
@@ -163,6 +197,8 @@ export interface DayResponse {
   tasks: DayTask[];
   /** 12..22 */
   hourly: DayHourly[];
+  /** Cola única: publication_jobs del día (single queue). */
+  publications: PublicationItem[];
 }
 
 export interface ClusterListItem {
@@ -399,6 +435,27 @@ export const STATUS_LABELS: Record<PlannerTaskStatus, string> = {
   completed: "Completada",
   error: "Error",
 };
+
+export const PUBLICATION_STATUS_LABELS: Record<PublicationStatus, string> = {
+  queued: "En cola",
+  running: "En curso",
+  completed: "Completada",
+  failed: "Fallida",
+  cancelled: "Cancelada",
+  review_required: "Revisión",
+};
+
+/** Clase ap-badge-* para el estado grueso de una publicación:
+ *  queued gris, running/review_required ámbar, completed verde,
+ *  failed rojo, cancelled gris oscuro (ap-badge-cancelled, definido en
+ *  planner.css). */
+export function publicationBadgeClass(status: PublicationStatus): string {
+  if (status === "running" || status === "review_required") return "ap-badge-warn";
+  if (status === "completed") return "ap-badge-live";
+  if (status === "failed") return "ap-badge-bad";
+  if (status === "cancelled") return "ap-badge-cancelled";
+  return "ap-badge-neutral";
+}
 
 export const ROUTINE_LABELS: Record<RoutineType, { title: string; desc: string; color: string }> = {
   warmup_daily: {

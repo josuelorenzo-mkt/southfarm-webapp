@@ -15,9 +15,11 @@ import { plannerApi, PlannerApiError } from "./api";
 import {
   BUENOS_AIRES_TIMEZONE,
   PLATFORM_META,
+  PUBLICATION_STATUS_LABELS,
   STATUS_LABELS,
   TASK_TYPE_META,
   formatBATime,
+  publicationBadgeClass,
   shortDate,
 } from "./types";
 import type { DayResponse, DayTask, PlannerTaskType } from "./types";
@@ -356,6 +358,39 @@ export default function DayView({ token, date, day, canManage, onBackToWeek, onP
         </div>
         <span style={{ color: "var(--text-dim)", fontSize: 10 }}>{visibleTasks.length} de {day.tasks.length} tareas visibles</span>
       </section>
+
+      {/* Cola única: publicaciones del día (publication_jobs). Solo se muestra
+          si el día tiene publicaciones. */}
+      {day.publications.length ? (
+        <section className="ap-card">
+          <div className="ap-card-heading">
+            <div>
+              <p className="ap-eyebrow ap-eyebrow-accent">COLA ÚNICA · PUBLICACIONES</p>
+              <h3>Publicaciones del día</h3>
+              <p className="ap-card-subtitle">La cola de publicación por cluster (publication_jobs): hora, plataforma, cuenta y estado.</p>
+            </div>
+            <span className="ap-badge ap-badge-neutral">{day.publications.length} publicación{day.publications.length === 1 ? "" : "es"}</span>
+          </div>
+          <div className="ap-pubs-list">
+            {day.publications.map((publication) => (
+              <div className="ap-pub" key={publication.id}>
+                <strong>{formatBATime(publication.scheduledFor)}</strong>
+                {publication.platform && (
+                  <span className={`ap-pill ap-pill-${publication.platform}`}>{(PLATFORM_META[publication.platform] || PLATFORM_META.instagram).short}</span>
+                )}
+                <span className="ap-pub-account">@{publication.account || "—"}</span>
+                {publication.clusterName || publication.clusterId != null ? (
+                  <span className="ap-pub-cluster">{publication.clusterName || `Cluster #${publication.clusterId}`}</span>
+                ) : null}
+                <em className="ap-pub-title">{publication.title || "— definir contenido —"}</em>
+                <span className={`ap-badge ${publicationBadgeClass(publication.status)}`}>
+                  <span className="ap-badge-dot" />{PUBLICATION_STATUS_LABELS[publication.status] || publication.status}
+                </span>
+              </div>
+            ))}
+          </div>
+        </section>
+      ) : null}
 
       <div className="ap-day-layout">
         <section className="ap-card">

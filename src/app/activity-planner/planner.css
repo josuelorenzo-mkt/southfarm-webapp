@@ -73,6 +73,12 @@
 .ap-badge-warn { color: #fbbf24; border-color: rgba(251, 191, 36, 0.22); background: var(--warning-dim); }
 .ap-badge-bad { color: #fca5a5; border-color: rgba(239, 68, 68, 0.2); background: var(--error-dim); }
 .ap-badge-neutral { color: var(--text-muted); }
+/* Cola única: publicaciones canceladas (gris oscuro, distinto del neutral). */
+.ap-badge-cancelled {
+  color: #6b7280;
+  border-color: rgba(107, 114, 128, 0.3);
+  background: rgba(107, 114, 128, 0.08);
+}
 .ap-badge-suggest {
   color: #c4b5fd;
   border-color: rgba(167, 139, 250, 0.28);
@@ -407,6 +413,34 @@
 
 .ap-cluster-meta { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .ap-cluster-hint { color: var(--text-dim); font-size: 10px; margin-left: auto; white-space: nowrap; }
+
+/* Cola única: publicaciones por cluster en la semana (publication_jobs) */
+.ap-pubs { display: flex; flex-direction: column; gap: 8px; margin-top: 7px; }
+.ap-pubs-head {
+  display: flex; align-items: center; justify-content: space-between;
+  color: var(--text-muted); font-size: 9px; letter-spacing: 0.06em; text-transform: uppercase;
+}
+.ap-pubs-head strong { color: var(--text-secondary); font-weight: 700; }
+.ap-pubs-list { display: flex; flex-direction: column; gap: 6px; }
+.ap-pubs-day { display: grid; grid-template-columns: 58px minmax(0, 1fr); gap: 8px; align-items: start; }
+.ap-pubs-day-label {
+  padding-top: 6px; color: var(--text-dim); font-size: 9px; font-weight: 700;
+  letter-spacing: 0.04em; text-transform: uppercase; white-space: nowrap;
+}
+.ap-pubs-day-items { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.ap-pub {
+  display: flex; align-items: center; gap: 7px; min-width: 0;
+  padding: 5px 9px;
+  border: 1px solid var(--border-subtle); border-radius: 9px;
+  background: rgba(255, 255, 255, 0.02);
+}
+.ap-pub > strong { color: var(--text-primary); font-size: 10px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ap-pub-account { color: var(--text-muted); font-size: 10px; white-space: nowrap; }
+.ap-pub-cluster { color: var(--text-dim); font-size: 10px; white-space: nowrap; }
+.ap-pub-title {
+  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--text-secondary); font-size: 10px; font-style: normal;
+}
 
 /* Barra de cumplimiento */
 .ap-compliance { display: flex; flex-direction: column; gap: 5px; }

@@ -10,16 +10,18 @@ import { plannerApi, PlannerApiError } from "./api";
 import {
   BUENOS_AIRES_TIMEZONE,
   PLATFORM_META,
+  PUBLICATION_STATUS_LABELS,
   STATUS_LABELS,
   TASK_TYPE_META,
   buenosAiresToday,
   formatBATime,
+  publicationBadgeClass,
   shortDate,
   shortWeekday,
   shiftDateKey,
   taskKind,
 } from "./types";
-import type { WeekCluster, WeekResponse, WeekTask } from "./types";
+import type { PublicationItem, WeekCluster, WeekResponse, WeekTask } from "./types";
 
 const CHART_W = 1000;
 const CHART_H = 118;
@@ -381,6 +383,53 @@ function ClusterRow({ cluster, weekStart, weekDays, todayIndex, nowRatio, canMan
     };
   }), [cluster.tasks, weekStart]);
 
+  /** Cola única: publicaciones del cluster dentro de la semana, agrupadas por
+   *  día (misma mecánica que dayTasks). Las canceladas no se muestran. */
+  const dayPublications: Array<{ publication: PublicationItem; dayIdx: number }> = useMemo(() => (cluster.publications || [])
+    .filter((publication) => publication.status !== "cancelled")
+    .map((publication) => {
+      const dateKey = publication.scheduledFor ? baDateKeyOf(publication.scheduledFor) : "";
+      return {
+        publication,
+        dayIdx: dateKey ? Math.min(6, Math.max(0, dayIndexFromDateKey(dateKey, weekStart))) : 0,
+      };
+    }), [cluster.publications, weekStart]);
+
+  const publicationsHTML: ReactNode = dayPublications.length ? (
+    <div className="ap-pubs">
+      <div className="ap-pubs-head">
+        <span>Publicaciones de la semana <strong>({dayPublications.length})</strong></span>
+        <span style={{ color: "var(--text-dim)", fontSize: 9 }}>cola única · publication_jobs</span>
+      </div>
+      <div className="ap-pubs-list">
+        {weekDays.map((dateKey, i) => {
+          const list = dayPublications.filter((info) => info.dayIdx === i);
+          if (!list.length) return null;
+          return (
+            <div className="ap-pubs-day" key={dateKey}>
+              <span className="ap-pubs-day-label">{shortWeekday(dateKey)}</span>
+              <div className="ap-pubs-day-items">
+                {list.map(({ publication }) => (
+                  <span className="ap-pub" key={publication.id}>
+                    <strong>{formatBATime(publication.scheduledFor)}</strong>
+                    {publication.platform && (
+                      <span className={`ap-pill ap-pill-${publication.platform}`}>{(PLATFORM_META[publication.platform] || PLATFORM_META.instagram).short}</span>
+                    )}
+                    <span className="ap-pub-account">@{publication.account || "—"}</span>
+                    <em className="ap-pub-title">{publication.title || "— definir contenido —"}</em>
+                    <span className={`ap-badge ${publicationBadgeClass(publication.status)}`}>
+                      <span className="ap-badge-dot" />{PUBLICATION_STATUS_LABELS[publication.status] || publication.status}
+                    </span>
+                  </span>
+                ))}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  ) : null;
+
   const activeRoutines = cluster.routines.filter((routine) => routine.status !== "paused").length;
   const sub = cluster.status === "suggested"
     ? `detectado automáticamente · ${cluster.accounts.length} cuentas matcheadas`
@@ -467,6 +516,7 @@ function ClusterRow({ cluster, weekStart, weekDays, todayIndex, nowRatio, canMan
         </div>
         <div className="ap-cluster-meta"><span className="ap-cluster-hint">{hint}</span></div>
         {complianceHTML}
+        {publicationsHTML}
         {cluster.status === "suggested" && (
           <div className="ap-suggest-actions">
             <button
