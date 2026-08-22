@@ -105,9 +105,14 @@
   font-size: 9px; font-weight: 700;
   border: 1px solid; border-radius: 99px;
 }
-.ap-pill-ig { color: var(--plat-ig); border-color: rgba(244, 114, 182, 0.3); background: rgba(244, 114, 182, 0.09); }
-.ap-pill-tt { color: var(--plat-tt); border-color: rgba(103, 232, 249, 0.3); background: rgba(103, 232, 249, 0.08); }
-.ap-pill-yt { color: var(--plat-yt); border-color: rgba(251, 113, 133, 0.3); background: rgba(251, 113, 133, 0.09); }
+/* FIX UI: el TSX emite el nombre COMPLETO de plataforma (ap-pill-instagram /
+   tiktok / youtube — PlannerPlatform), no el código corto del mockup. Sin
+   estas variantes el chip salía sin color de plataforma en día, semana,
+   detalle y picker. Se listan junto a los cortos (-ig/-tt/-yt) para cubrir
+   ambos usos. */
+.ap-pill-ig, .ap-pill-instagram { color: var(--plat-ig); border-color: rgba(244, 114, 182, 0.3); background: rgba(244, 114, 182, 0.09); }
+.ap-pill-tt, .ap-pill-tiktok { color: var(--plat-tt); border-color: rgba(103, 232, 249, 0.3); background: rgba(103, 232, 249, 0.08); }
+.ap-pill-yt, .ap-pill-youtube { color: var(--plat-yt); border-color: rgba(251, 113, 133, 0.3); background: rgba(251, 113, 133, 0.09); }
 
 /* Burbujas de cuentas */
 .ap-bubble {
@@ -120,9 +125,10 @@
   transition: transform 0.18s ease, box-shadow 0.18s ease;
 }
 .ap-bubble-lg { width: 54px; height: 54px; flex-basis: 54px; font-size: 15px; border-radius: 16px; }
-.ap-bubble-ig { color: var(--plat-ig); border-color: rgba(244, 114, 182, 0.34); background: rgba(244, 114, 182, 0.1); }
-.ap-bubble-tt { color: var(--plat-tt); border-color: rgba(103, 232, 249, 0.34); background: rgba(103, 232, 249, 0.09); }
-.ap-bubble-yt { color: var(--plat-yt); border-color: rgba(251, 113, 133, 0.34); background: rgba(251, 113, 133, 0.1); }
+/* FIX UI: mismas variantes por nombre completo que .ap-pill-* (ver arriba). */
+.ap-bubble-ig, .ap-bubble-instagram { color: var(--plat-ig); border-color: rgba(244, 114, 182, 0.34); background: rgba(244, 114, 182, 0.1); }
+.ap-bubble-tt, .ap-bubble-tiktok { color: var(--plat-tt); border-color: rgba(103, 232, 249, 0.34); background: rgba(103, 232, 249, 0.09); }
+.ap-bubble-yt, .ap-bubble-youtube { color: var(--plat-yt); border-color: rgba(251, 113, 133, 0.34); background: rgba(251, 113, 133, 0.1); }
 .ap-bubble:hover { transform: translateY(-2px) scale(1.05); }
 
 /* Cards */
@@ -243,6 +249,9 @@
   border-radius: 50%;
   animation: apSpin 0.8s linear infinite;
 }
+/* FIX UI: label "Actualizando…" de la vista semana (planner-week.tsx) usaba
+   una clase sin definición + inline style. */
+.ap-loading-label { margin: 0; text-align: center; color: var(--text-muted); font-size: 10px; }
 .ap-empty {
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 9px;
   padding: 34px 20px;
@@ -268,6 +277,9 @@
 .ap-week-range button { min-height: 30px; min-width: 32px; display: grid; place-items: center; color: var(--text-muted); border: 0; border-radius: 7px; background: transparent; }
 .ap-week-range button:hover { color: var(--text-primary); background: var(--bg-hover); }
 .ap-week-range > span { padding: 0 10px; color: var(--text-secondary); font-size: 12px; font-weight: 600; white-space: nowrap; }
+/* FIX UI: "Actualizado hace Xm" del header (planner-page.tsx) — clase usada
+   sin definición (el mockup la define: color muted, 11px). */
+.ap-last-sync { color: var(--text-muted); font-size: 11px; }
 
 /* ============ Resumen de la semana ============ */
 
@@ -314,6 +326,16 @@
 }
 .ap-cluster-row:hover { border-color: var(--border-default); box-shadow: var(--shadow-md); }
 .ap-cluster-row:focus-within { border-color: rgba(34, 197, 94, 0.35); }
+/* FIX UI: elevar la fila activa sobre sus hermanas. Cada fila es un stacking
+   context (animation-fill-mode: both sobre transform en apFloatIn) y sus
+   hijas quedan confinadas a ese nivel (.ap-cluster-row > * { z-index: 1 });
+   el tooltip del chart (.ap-chart-tip, hasta ~212px desde el tope de un
+   chart de 118px) desborda la card hacia abajo y las filas siguientes —
+   después en el DOM, mismo nivel de apilamiento — lo pintaban ENCIMA,
+   recortándolo. Con z-index al hacer hover/focus la fila (y su tooltip)
+   pasa arriba de las vecinas, como en el mockup donde no hay contextos que
+   lo oculten. */
+.ap-cluster-row:hover, .ap-cluster-row:focus-within { z-index: 20; }
 
 /* Glow de borde en hover (v5.1 — SVG, correcto por construcción): el trazo
    perimetral viaja por el borde de la card y NADA se pinta en el interior.
