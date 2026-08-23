@@ -630,8 +630,8 @@ function DeviceCard({ device, accounts, activeRun, token, onChanged, canManage, 
 }
 
 function FleetPage({ devices, accounts, runs, token, onChanged, canManageDevices, canRunTasks }: { devices: Device[]; accounts: SocialAccount[]; runs: TaskRun[]; token: string; onChanged: () => void; canManageDevices: boolean; canRunTasks: boolean }) {
-  // Un solo stream en vivo a la vez en toda la app: guardamos qué device lo tiene abierto.
-  const [liveDeviceId, setLiveDeviceId] = useState<number | null>(null);
+  // Multi-vista: varios streams en vivo simultáneos (uno por dispositivo).
+  const [liveDeviceIds, setLiveDeviceIds] = useState<number[]>([]);
   const revoke = async (id: number) => {
     if (!window.confirm("¿Revocar este celular? Dejará de aparecer en la flota y deberá vincularse nuevamente.")) return;
     try {
@@ -641,7 +641,7 @@ function FleetPage({ devices, accounts, runs, token, onChanged, canManageDevices
       window.alert(cause instanceof Error ? cause.message : "No se pudo revocar el dispositivo");
     }
   };
-  return <div className="cc-page-stack"><section className="cc-section-intro"><div><p className="cc-eyebrow cc-eyebrow-accent">DEVICE CONTROL</p><h2>Tu flota, a la vista.</h2><p>La conexión y la ejecución se muestran como estados independientes.</p></div><div className="cc-intro-stats"><strong>{devices.filter((device) => device.online).length}<small>online</small></strong><span>/</span><strong>{devices.length}<small>activos</small></strong></div></section><DevicePairingCard token={token} canManage={canManageDevices} />{devices.length ? <div className="cc-device-grid">{devices.map((device) => <DeviceCard key={device.id} device={device} accounts={accounts} activeRun={runs.find((run) => run.device_id === device.id && ["pending", "running", "paused"].includes(run.status))} token={token} onChanged={onChanged} canManage={canManageDevices} canRunTasks={canRunTasks} onRevoke={(id) => void revoke(id)} bridgeUrl={SCREEN_BRIDGE_URL} liveActive={liveDeviceId === device.id} onLiveToggle={(open) => setLiveDeviceId(open ? device.id : null)} />)}</div> : <section className="cc-card"><EmptyState title="No hay dispositivos registrados" detail="Vinculá un Android para que aparezca acá." /></section>}</div>;
+  return <div className="cc-page-stack"><section className="cc-section-intro"><div><p className="cc-eyebrow cc-eyebrow-accent">DEVICE CONTROL</p><h2>Tu flota, a la vista.</h2><p>La conexión y la ejecución se muestran como estados independientes.</p></div><div className="cc-intro-stats"><strong>{devices.filter((device) => device.online).length}<small>online</small></strong><span>/</span><strong>{devices.length}<small>activos</small></strong></div></section><DevicePairingCard token={token} canManage={canManageDevices} />{devices.length ? <div className="cc-device-grid">{devices.map((device) => <DeviceCard key={device.id} device={device} accounts={accounts} activeRun={runs.find((run) => run.device_id === device.id && ["pending", "running", "paused"].includes(run.status))} token={token} onChanged={onChanged} canManage={canManageDevices} canRunTasks={canRunTasks} onRevoke={(id) => void revoke(id)} bridgeUrl={SCREEN_BRIDGE_URL} liveActive={liveDeviceIds.includes(device.id)} onLiveToggle={(open) => setLiveDeviceIds((ids) => open ? [...ids, device.id] : ids.filter((id) => id !== device.id))} />)}</div> : <section className="cc-card"><EmptyState title="No hay dispositivos registrados" detail="Vinculá un Android para que aparezca acá." /></section>}</div>;
 }
 
 function AccountsInventory({ accounts, devices }: { accounts: SocialAccount[]; devices: Device[] }) {
