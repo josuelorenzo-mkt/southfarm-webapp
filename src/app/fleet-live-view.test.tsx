@@ -26,6 +26,8 @@ class StubVideoDecoder {
   state = "unconfigured";
   config: Record<string, unknown> | null = null;
   lastChunk: unknown = null;
+  decodeQueueSize = 0;
+  resetCalls = 0;
   constructor(public init: { output: (frame: unknown) => void; error: (cause: unknown) => void }) {
     StubVideoDecoder.instances.push(this);
   }
@@ -36,6 +38,11 @@ class StubVideoDecoder {
   decode(chunk: unknown) {
     this.lastChunk = chunk;
     this.init.output(new StubVideoFrame());
+  }
+  reset() {
+    // Igual que el decoder real: tira la cola y vuelve a "configured".
+    this.resetCalls += 1;
+    this.lastChunk = null;
   }
   close() {
     this.state = "closed";
@@ -98,6 +105,15 @@ function keyFrameBuffer(): ArrayBuffer {
   return new Uint8Array([0, 0, 0, 1, 0x65, 0x88, 0x84, 0x00, 0x10, 0xff]).buffer;
 }
 
+function deltaFrameBuffer(): ArrayBuffer {
+  // Annex B con un NAL no-IDR (type 1): 00 00 00 01 41 ...
+  return new Uint8Array([0, 0, 0, 1, 0x41, 0x9a, 0x02, 0x05]).buffer;
+}
+
+function panelElement(): HTMLElement {
+  return document.querySelector("section.cc-live-panel") as HTMLElement;
+}
+
 beforeEach(() => {
   MockWebSocket.instances = [];
   devicesPayload = [
@@ -117,8 +133,24 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
   vi.unstubAllGlobals();
 });
+
+/** Lleva la vista hasta EN VIVO y devuelve el socket usado. */
+async function goLive(alias = "Poco Uno") {
+  stubWebCodecs();
+  render(<DeviceLiveView bridgeUrl="http://localhost:8100" deviceAlias={alias} onClose={vi.fn()} />);
+  await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+  const socket = MockWebSocket.instances[0];
+  await act(async () => {
+    socket.serverAccept();
+    socket.serverText(JSON.stringify({ codec: "h264", description: null }));
+    socket.serverBinary(keyFrameBuffer());
+  });
+  expect(await screen.findByText("EN VIVO")).toBeTruthy();
+  return socket;
+}
 
 describe("Vista en vivo de Device Fleet", () => {
   it('el toggle alterna entre "Ver pantalla" y "Detener" y emite el click', () => {
@@ -211,5 +243,108 @@ describe("Vista en vivo de Device Fleet", () => {
       expect(MockWebSocket.instances.map((socket) => socket.url)).toEqual(["ws://localhost:8100/ws/stream/SER-B"]);
     });
     expect(await screen.findByText("Conectando…")).toBeTruthy();
+  });
+
+  it("la ráfaga inicial del GOP cacheado no dispara descarte ni reset del decoder", async () => {
+    stubWebCodecs();
+    render(<DeviceLiveView bridgeUrl="http://localhost:8100" deviceAlias="Poco Uno" onClose={vi.fn()} />);
+    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    const socket = MockWebSocket.instances[0];
+    await act(async () => {
+      socket.serverAccept();
+      socket.serverText(JSON.stringify({ codec: "h264", description: null }));
+    });
+    const decoder = StubVideoDecoder.instances[0];
+    decoder.decodeQueueSize = 5; // cola llena instantánea, como en el replay real del cache
+    await act(async () => {
+      socket.serverBinary(keyFrameBuffer());
+      for (let i = 0; i < 12; i += 1) socket.serverBinary(deltaFrameBuffer()); // ráfaga del GOP
+    });
+    expect(decoder.resetCalls).toBe(0); // gracia inicial: nada se reseteó
+    const types = StubEncodedVideoChunk.created.map((chunk) => chunk.type);
+    expect(types[0]).toBe("key");
+    expect(types.filter((type) => type === "delta")).toHaveLength(12); // ningún delta descartado
+    expect(await screen.findByText("EN VIVO")).toBeTruthy();
+  });
+
+  it("descarta deltas solo ante sobrecarga sostenida y vuelve con el próximo IDR", async () => {
+    const socket = await goLive(); // al terminar goLive ya se renderizó un frame: gracia levantada
+    const decoder = StubVideoDecoder.instances[0];
+    decoder.decodeQueueSize = 5;
+    await act(async () => {
+      socket.serverBinary(deltaFrameBuffer()); // lectura 1: se mide, aún no arma resync
+    });
+    expect(decoder.resetCalls).toBe(0);
+    await act(async () => {
+      socket.serverBinary(deltaFrameBuffer()); // lectura 2 consecutiva: resync armado + reset inmediato
+    });
+    expect(decoder.resetCalls).toBe(1);
+    await act(async () => {
+      socket.serverBinary(deltaFrameBuffer()); // en resync: delta descartado sin crear chunk
+    });
+    const totalAntesDelIdr = StubEncodedVideoChunk.created.length;
+    await act(async () => {
+      socket.serverBinary(keyFrameBuffer()); // IDR cierra el resync y se alimenta
+    });
+    const created = StubEncodedVideoChunk.created;
+    expect(created.length).toBe(totalAntesDelIdr + 1);
+    expect(created[created.length - 1].type).toBe("key");
+  });
+
+  it("reconecta automáticamente cuando el WebSocket se cierra sin intención", async () => {
+    const socket = await goLive();
+    await act(async () => {
+      socket.close(); // cierre remoto simulado (no intencional)
+    });
+    expect(await screen.findByText("Conectando…")).toBeTruthy(); // spinner, no overlay permanente
+    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(2), { timeout: 4000 });
+    const secondSocket = MockWebSocket.instances[1];
+    expect(secondSocket.url).toBe("ws://localhost:8100/ws/stream/SER-1"); // misma fuente
+    expect(secondSocket).not.toBe(socket);
+    await act(async () => {
+      secondSocket.serverAccept();
+      secondSocket.serverText(JSON.stringify({ codec: "h264", description: null }));
+      secondSocket.serverBinary(keyFrameBuffer());
+    });
+    expect(await screen.findByText("EN VIVO")).toBeTruthy();
+    expect(screen.queryByText(/Sin señal/i)).toBeNull();
+  });
+
+  it("watchdog: sin mensajes del bridge por más de 8s cierra y reconecta solo", { timeout: 20000 }, async () => {
+    await goLive();
+    // Sin enviar nada, dejamos correr el reloj real hasta superar WATCHDOG_STALL_MS.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 8600));
+    });
+    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(2), { timeout: 4000 });
+    expect(MockWebSocket.instances[1].url).toBe("ws://localhost:8100/ws/stream/SER-1");
+    expect(screen.queryByText(/Sin señal/i)).toBeNull();
+  });
+
+  it('maneja {type:"waiting"} como recuperación sin cortar la conexión y expone data-*', async () => {
+    const socket = await goLive();
+    const panel = panelElement();
+    expect(panel.getAttribute("data-phase")).toBe("live");
+
+    await act(async () => {
+      socket.serverText(JSON.stringify({ type: "waiting" })); // bridge entrando a su ciclo de recuperación
+    });
+    expect(screen.getByText("Recuperando transmisión…")).toBeTruthy();
+    expect(socket.closed).toBe(false); // la conexión NO se corta
+    expect(StubVideoDecoder.instances[0].state).toBe("configured"); // decoder intacto
+    expect(panel.getAttribute("data-phase")).toBe("recovering");
+
+    await act(async () => {
+      socket.serverBinary(keyFrameBuffer()); // el stream vuelve
+    });
+    expect(await screen.findByText("EN VIVO")).toBeTruthy();
+    expect(panel.getAttribute("data-phase")).toBe("live");
+    // Instrumentación completa visible tras el tick del interval de stats.
+    await waitFor(() => {
+      expect(panel.getAttribute("data-resync-count")).not.toBeNull();
+      expect(panel.getAttribute("data-decode-errors")).not.toBeNull();
+      expect(panel.getAttribute("data-queue-size")).not.toBeNull();
+      expect(panel.getAttribute("data-last-msg-age-ms")).not.toBeNull();
+    });
   });
 });

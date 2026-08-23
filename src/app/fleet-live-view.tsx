@@ -17,9 +17,28 @@ const AVC_CODEC_STRING = "avc1.640034";
 const HEVC_CODEC_STRING = "hev1.1.6.L93.B0";
 const BRIDGE_FETCH_TIMEOUT_MS = 6000;
 const WS_CONNECT_TIMEOUT_MS = 8000;
-// ~166 ms a 30fps: si la cola de decode supera esto, se descartan deltas hasta
-// el próximo IDR y se resetea el decoder para volver al borde en vivo.
+// ~166 ms a 30fps: cola de decode por encima de esto se considera sobrecarga.
+// No alcanza con una lectura: una ráfaga (ej. replay del GOP cacheado) supera
+// el umbral instantáneamente sin ser congestión real, así que exigimos
+// sobrecarga sostenida antes de descartar deltas hasta el próximo IDR.
 const MAX_DECODE_QUEUE = 5;
+// Lecturas consecutivas (por chunk entrante) o milisegundos sostenidos por
+// encima de MAX_DECODE_QUEUE antes de armar un resync.
+const BACKPRESSURE_MIN_OVERLOAD_READINGS = 2;
+const BACKPRESSURE_SUSTAINED_MS = 300;
+// Watchdog: sin NINGÚN mensaje del bridge durante este tiempo asumimos socket
+// half-open y forzamos cierre → reconexión automática.
+const WATCHDOG_STALL_MS = 8000;
+// Resync armado sin output del decoder durante este tiempo (IDR perdido o
+// corrupto): cerramos y reconectamos para traer un GOP fresco del cache.
+const RESYNC_OUTPUT_TIMEOUT_MS = 4000;
+// Reconexión automática con backoff exponencial acotado.
+const RECONNECT_BASE_DELAY_MS = 500;
+const RECONNECT_MAX_DELAY_MS = 5000;
+// Una sesión que estuvo estable este tiempo resetea el backoff al valor base.
+const RECONNECT_STABLE_SESSION_MS = 30000;
+// Frames decodificados sin errores que perdonan los errores aislados previos.
+const DECODE_ERRORS_DECAY_FRAMES = 60;
 
 export interface ScreenBridgeDevice {
   serial: string;
@@ -38,6 +57,16 @@ interface StreamHeader {
   codec?: string;
   description?: string | null;
 }
+
+/** Instrumentación observable vía atributos data-* en el panel (FIX diagnóstico). */
+interface LiveStats {
+  resyncCount: number;
+  decodeErrors: number;
+  lastMsgAgeMs: number;
+  queueSize: number;
+}
+
+const INITIAL_LIVE_STATS: LiveStats = { resyncCount: 0, decodeErrors: 0, lastMsgAgeMs: 0, queueSize: 0 };
 
 function bridgeBase(bridgeUrl: string): string {
   return bridgeUrl.replace(/\/$/, "");
@@ -164,6 +193,10 @@ export function DeviceLiveView({ bridgeUrl, deviceAlias, onClose }: { bridgeUrl:
   const [phase, setPhase] = useState<LivePhase>("idle");
   const [errorMessage, setErrorMessage] = useState("");
   const [fps, setFps] = useState(0);
+  // Sub-fase de recuperación: el bridge avisó {type:"waiting"}; mostramos estado
+  // de recuperación sin cortar socket ni decoder.
+  const [recovering, setRecovering] = useState(false);
+  const [liveStats, setLiveStats] = useState<LiveStats>(INITIAL_LIVE_STATS);
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
@@ -174,6 +207,13 @@ export function DeviceLiveView({ bridgeUrl, deviceAlias, onClose }: { bridgeUrl:
   const pendingFrameRef = useRef<VideoFrame | null>(null);
   const rafRef = useRef<number | null>(null);
   const ctxRef = useRef<CanvasRenderingContext2D | null>(null);
+  // Reconexión automática: referencia para re-lanzar startStream desde closures
+  // de intentos anteriores + estado de backoff que sobrevive a cada intento.
+  const startStreamRef = useRef<(targetSerial: string) => void>(() => {});
+  const reconnectTimerRef = useRef<number | null>(null);
+  const reconnectAttemptsRef = useRef(0);
+  const stableSessionAtRef = useRef<number | null>(null);
+  const mountedRef = useRef(true);
 
   /** Cierra socket, decodificador y timers. Segura de llamar varias veces. */
   const teardown = useCallback(() => {
@@ -184,6 +224,10 @@ export function DeviceLiveView({ bridgeUrl, deviceAlias, onClose }: { bridgeUrl:
     if (fpsIntervalRef.current !== null) {
       window.clearInterval(fpsIntervalRef.current);
       fpsIntervalRef.current = null;
+    }
+    if (reconnectTimerRef.current !== null) {
+      window.clearTimeout(reconnectTimerRef.current);
+      reconnectTimerRef.current = null;
     }
     if (rafRef.current !== null) {
       window.cancelAnimationFrame(rafRef.current);
@@ -200,12 +244,49 @@ export function DeviceLiveView({ bridgeUrl, deviceAlias, onClose }: { bridgeUrl:
     setFps(0);
   }, []);
 
-  useEffect(() => () => teardown(), [teardown]);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      teardown();
+    };
+  }, [teardown]);
+
+  /**
+   * Reconexión automática ante cierres NO intencionales: backoff exponencial
+   * (500ms base, tope 5s) que se resetea si la sesión previa estuvo estable.
+   * Reconectar re-corre startStream completo; el bridge re-envía el GOP cache
+   * al reconnectar, así que la vista vuelve sola al borde en vivo.
+   */
+  const scheduleReconnect = useCallback((targetSerial: string) => {
+    if (!mountedRef.current) return;
+    const now = performance.now();
+    if (stableSessionAtRef.current !== null && now - stableSessionAtRef.current >= RECONNECT_STABLE_SESSION_MS) {
+      reconnectAttemptsRef.current = 0;
+    }
+    stableSessionAtRef.current = null;
+    const attempt = reconnectAttemptsRef.current;
+    reconnectAttemptsRef.current = attempt + 1;
+    const delay = Math.min(RECONNECT_BASE_DELAY_MS * 2 ** attempt, RECONNECT_MAX_DELAY_MS);
+    if (reconnectTimerRef.current !== null) window.clearTimeout(reconnectTimerRef.current);
+    reconnectTimerRef.current = window.setTimeout(() => {
+      reconnectTimerRef.current = null;
+      if (!mountedRef.current) return;
+      setErrorMessage("");
+      startStreamRef.current(targetSerial);
+    }, delay);
+    // Spinner durante el backoff (en vez de overlay de error permanente).
+    setErrorMessage("");
+    setPhase("connecting");
+  }, []);
 
   const startStream = useCallback((targetSerial: string) => {
     teardown();
     setErrorMessage("");
+    setRecovering(false);
+    setLiveStats(INITIAL_LIVE_STATS);
     setPhase("connecting");
+    stableSessionAtRef.current = null;
 
     if (typeof VideoDecoder !== "function" || typeof EncodedVideoChunk !== "function") {
       setPhase("error");
@@ -221,8 +302,20 @@ export function DeviceLiveView({ bridgeUrl, deviceAlias, onClose }: { bridgeUrl:
     let lastTimestamp = 0;
     let codecString = AVC_CODEC_STRING;
     let resyncPending = false;
+    let resyncCount = 0;
     let decodeErrors = 0;
     let decoderConfig: VideoDecoderConfig | null = null;
+    // Gracia inicial: al conectar, el bridge vuelca el GOP cacheado de golpe y
+    // decodeQueueSize supera el máximo sin que sea congestión real. No evaluamos
+    // backpressure hasta renderizar el primer frame posterior al keyframe inicial.
+    let backpressureGrace = true;
+    // Medición de sobrecarga SOSTENIDA: lecturas consecutivas por encima del
+    // máximo (o milisegundos acumulados) antes de armar un resync.
+    let overloadSince: number | null = null;
+    let overloadReadings = 0;
+    // Watchdogs: última actividad del socket y último output del decoder.
+    let lastActivityAt = performance.now();
+    let lastOutputAt = performance.now();
 
     const fail = (message: string) => {
       teardown();
@@ -246,12 +339,21 @@ export function DeviceLiveView({ bridgeUrl, deviceAlias, onClose }: { bridgeUrl:
       }
       frame.close();
       decodedFrames += 1;
-      if (decodedFrames === 1) setPhase("live");
+      backpressureGrace = false; // fin de la ventana del replay del GOP cacheado
+      setRecovering(false); // hay output fresco: salimos del estado de recuperación
+      if (decodedFrames === 1) {
+        setPhase("live");
+        stableSessionAtRef.current = performance.now(); // arranque de la sesión "estable"
+      }
+      // Progreso saludable sostenido: los errores aislados viejos no se acumulan
+      // hasta matar la vista en sesiones largas.
+      if (decodedFrames % DECODE_ERRORS_DECAY_FRAMES === 0) decodeErrors = 0;
     };
 
     const onDecoderOutput = (frame: VideoFrame) => {
       pendingFrameRef.current?.close(); // descarta el anterior: mínima latencia de display
       pendingFrameRef.current = frame;
+      lastOutputAt = performance.now();
       if (rafRef.current === null) rafRef.current = window.requestAnimationFrame(render);
     };
 
@@ -276,6 +378,8 @@ export function DeviceLiveView({ bridgeUrl, deviceAlias, onClose }: { bridgeUrl:
           }
           keySeen = false;
           resyncPending = false;
+          overloadSince = null;
+          overloadReadings = 0;
           buildDecoder();
         },
       });
@@ -285,19 +389,47 @@ export function DeviceLiveView({ bridgeUrl, deviceAlias, onClose }: { bridgeUrl:
 
     const feed = (bytes: Uint8Array, isKey: boolean) => {
       if (!decoder || decoder.state !== "configured") return;
-      // Backpressure: si la cola de decode crece, descartamos deltas hasta el
-      // próximo IDR y reseteamos para volver al borde en vivo sin acumular latencia.
-      if (!isKey && decoder.decodeQueueSize >= MAX_DECODE_QUEUE) {
-        resyncPending = true;
-        return;
-      }
-      if (isKey && resyncPending) {
-        try {
-          decoder.reset(); // tira la cola atrasada; vuelve a "configured"
-        } catch {
-          /* si falla, el error handler rearma */
+      if (isKey) {
+        if (resyncPending) {
+          try {
+            decoder.reset(); // tira la cola atrasada; vuelve a "configured"
+          } catch {
+            /* si falla, el error handler rearma */
+          }
+          resyncPending = false;
         }
-        resyncPending = false;
+        overloadSince = null;
+        overloadReadings = 0;
+      } else {
+        if (resyncPending) return; // descartando deltas hasta el próximo IDR
+        const queueSize = decoder.decodeQueueSize;
+        if (queueSize >= MAX_DECODE_QUEUE && !backpressureGrace) {
+          const now = performance.now();
+          if (overloadSince === null) {
+            overloadSince = now;
+            overloadReadings = 1;
+          } else {
+            overloadReadings += 1;
+          }
+          // Solo armamos resync si la sobrecarga es SOSTENIDA: una ráfaga aislada
+          // se absorbe descartando algún delta suelto, sin congelar hasta el IDR.
+          if (overloadReadings >= BACKPRESSURE_MIN_OVERLOAD_READINGS || now - overloadSince > BACKPRESSURE_SUSTAINED_MS) {
+            resyncPending = true;
+            resyncCount += 1;
+            overloadSince = null;
+            overloadReadings = 0;
+            try {
+              decoder.reset(); // drena la latencia acumulada YA, no recién en el IDR
+            } catch {
+              /* si falla, el error handler rearma */
+            }
+          }
+          return; // el delta sobrante se descarta (midiendo o ya en resync)
+        }
+        if (queueSize < MAX_DECODE_QUEUE) {
+          overloadSince = null;
+          overloadReadings = 0;
+        }
       }
       let timestamp = Math.round(performance.now() * 1000);
       if (timestamp <= lastTimestamp) timestamp = lastTimestamp + 1;
@@ -315,25 +447,41 @@ export function DeviceLiveView({ bridgeUrl, deviceAlias, onClose }: { bridgeUrl:
       wsRef.current = socket;
 
       socket.onmessage = (event: MessageEvent) => {
+        lastActivityAt = performance.now(); // alimenta el watchdog de estancamiento
         const data: unknown = event.data;
         if (typeof data === "string") {
           if (headerSeen) {
-            // Mensajes de control posteriores al header: ej. errores reportados por el bridge.
+            // Mensajes de control posteriores al header: errores o avisos del bridge.
             try {
               const control = JSON.parse(data) as { type?: string; message?: string };
-              if (control?.type === "error") fail(control.message || "El bridge reportó un error.");
+              if (control?.type === "error") {
+                fail(control.message || "El bridge reportó un error.");
+              } else if (control?.type === "waiting") {
+                // El bridge entró en su ciclo de recuperación del stream: pasamos a
+                // sub-fase "recuperando" SIN cerrar socket ni decoder.
+                setRecovering(true);
+              }
             } catch {
               // Texto no-JSON: ignorar.
             }
             return;
           }
-          let header: StreamHeader | null = null;
+          let header: (StreamHeader & { type?: unknown; message?: unknown }) | null = null;
           try {
-            header = JSON.parse(data) as StreamHeader;
+            header = JSON.parse(data) as StreamHeader & { type?: unknown; message?: unknown };
           } catch {
             return;
           }
           if (!header || typeof header !== "object") return;
+          if (typeof header.type === "string") {
+            // Control antes del header (poco común): mismos comportamientos.
+            if (header.type === "error") {
+              fail(typeof header.message === "string" && header.message ? header.message : "El bridge reportó un error.");
+            } else if (header.type === "waiting") {
+              setRecovering(true);
+            }
+            return;
+          }
           headerSeen = true;
           const codec = normalizeCodec(header.codec);
           if (!codec) {
@@ -350,6 +498,33 @@ export function DeviceLiveView({ bridgeUrl, deviceAlias, onClose }: { bridgeUrl:
             fpsIntervalRef.current = window.setInterval(() => {
               setFps(decodedFrames - lastFpsTick);
               lastFpsTick = decodedFrames;
+              // Instrumentación observable para pruebas automatizadas / diagnóstico.
+              setLiveStats({
+                resyncCount,
+                decodeErrors,
+                lastMsgAgeMs: Math.max(0, Math.round(performance.now() - lastActivityAt)),
+                queueSize: decoder ? decoder.decodeQueueSize : 0,
+              });
+              const now = performance.now();
+              if (now - lastActivityAt > WATCHDOG_STALL_MS) {
+                // Socket half-open u origen colgado: cierre deliberado → onclose
+                // dispara la reconexión automática.
+                try {
+                  socket.close();
+                } catch {
+                  /* ya cerrado */
+                }
+                return;
+              }
+              if (resyncPending && now - lastOutputAt > RESYNC_OUTPUT_TIMEOUT_MS) {
+                // Resync esperando un IDR que nunca llega: la reconexión trae un
+                // GOP fresco desde el cache del bridge.
+                try {
+                  socket.close();
+                } catch {
+                  /* ya cerrado */
+                }
+              }
             }, 1000);
           } catch (cause) {
             fail(cause instanceof Error ? cause.message : "No se pudo configurar el decodificador.");
@@ -370,22 +545,31 @@ export function DeviceLiveView({ bridgeUrl, deviceAlias, onClose }: { bridgeUrl:
         feed(bytes, isKey);
       };
 
-      socket.onerror = () => {
-        if (wsRef.current === socket) fail("No se pudo conectar con el bridge de pantalla.");
-      };
-      socket.onclose = () => {
+      let reconnectRequested = false;
+      /** Cierre NO intencional: limpiar y programar reconexión con backoff. */
+      const requestReconnect = () => {
+        if (reconnectRequested) return;
+        reconnectRequested = true;
         if (wsRef.current !== socket) return; // cierre local intencional ya gestionado
-        wsRef.current = null;
-        if (decoder && decoder.state !== "closed") decoder.close();
-        fail("La conexión con el bridge de pantalla se cerró.");
+        teardown(); // el socket ya está cerrando/cerrado; limpia timers, decoder y frame
+        scheduleReconnect(targetSerial);
       };
+      socket.onerror = () => requestReconnect();
+      socket.onclose = () => requestReconnect();
       connectTimeoutRef.current = window.setTimeout(() => {
-        if (wsRef.current === socket && socket.readyState === 0) fail("Tiempo de espera agotado con el bridge de pantalla.");
+        // Timeout cubre solo CONNECTING: tratamos el intento como fallido y
+        // reconectamos con backoff en lugar de rendir permanentemente.
+        if (wsRef.current === socket && socket.readyState === 0) requestReconnect();
       }, WS_CONNECT_TIMEOUT_MS);
     } catch (cause) {
       fail(cause instanceof Error ? cause.message : "No se pudo iniciar la transmisión.");
     }
-  }, [bridgeUrl, teardown]);
+  }, [bridgeUrl, scheduleReconnect, teardown]);
+
+  // Referencia usada por scheduleReconnect para relanzar el intento más reciente.
+  useEffect(() => {
+    startStreamRef.current = startStream;
+  }, [startStream]);
 
   const onlineDevices = devicesState.status === "ready"
     ? devicesState.devices.filter((item) => item.online !== false)
@@ -409,6 +593,7 @@ export function DeviceLiveView({ bridgeUrl, deviceAlias, onClose }: { bridgeUrl:
 
   const retry = useCallback(() => {
     teardown();
+    reconnectAttemptsRef.current = 0; // reintento manual: backoff fresco
     autoResolvedRef.current = false;
     setSerial(null);
     setPickedSerial("");
@@ -428,19 +613,28 @@ export function DeviceLiveView({ bridgeUrl, deviceAlias, onClose }: { bridgeUrl:
     startStream(pickedSerial);
   };
 
+  const recoveringView = phase === "live" && recovering;
+
   return (
-    <section className="cc-live-panel">
+    <section
+      className="cc-live-panel"
+      data-phase={recoveringView ? "recovering" : phase}
+      data-resync-count={liveStats.resyncCount}
+      data-decode-errors={liveStats.decodeErrors}
+      data-last-msg-age-ms={liveStats.lastMsgAgeMs}
+      data-queue-size={liveStats.queueSize}
+    >
       <div className="cc-live-head">
         <strong className="cc-live-title">Vista en vivo</strong>
         <div className="cc-live-status">
-          {phase === "live" && (
+          {phase === "live" && !recoveringView && (
             <>
               <span className="cc-live-badge"><i className="cc-live-dot" aria-hidden="true" />EN VIVO</span>
               {fps > 0 && <span className="cc-live-fps">{fps} fps</span>}
             </>
           )}
-          {phase === "connecting" && (
-            <><span className="cc-live-spinner" aria-hidden="true" /><span>Conectando…</span></>
+          {(phase === "connecting" || recoveringView) && (
+            <><span className="cc-live-spinner" aria-hidden="true" /><span>{recoveringView ? "Recuperando…" : "Conectando…"}</span></>
           )}
           <button type="button" className="cc-live-close" title="Cerrar vista en vivo" aria-label="Cerrar vista en vivo" onClick={stopAndClose}>×</button>
         </div>
@@ -448,8 +642,10 @@ export function DeviceLiveView({ bridgeUrl, deviceAlias, onClose }: { bridgeUrl:
 
       <div className="cc-live-canvas-wrap">
         <canvas ref={canvasRef} className="cc-live-canvas" role="img" aria-label={`Transmisión en vivo de ${deviceAlias}`} />
-        {phase !== "live" && phase !== "connecting" && (
-          <div className="cc-live-placeholder">{phase === "error" ? "Sin señal" : "Esperando transmisión…"}</div>
+        {((phase !== "live" && phase !== "connecting") || recoveringView) && (
+          <div className="cc-live-placeholder">
+            {phase === "error" ? "Sin señal" : recoveringView ? "Recuperando transmisión…" : "Esperando transmisión…"}
+          </div>
         )}
       </div>
 
