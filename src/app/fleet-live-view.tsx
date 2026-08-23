@@ -17,6 +17,9 @@ const AVC_CODEC_STRING = "avc1.640034";
 const HEVC_CODEC_STRING = "hev1.1.6.L93.B0";
 const BRIDGE_FETCH_TIMEOUT_MS = 6000;
 const WS_CONNECT_TIMEOUT_MS = 8000;
+// ~166 ms a 30fps: si la cola de decode supera esto, se descartan deltas hasta
+// el próximo IDR y se resetea el decoder para volver al borde en vivo.
+const MAX_DECODE_QUEUE = 5;
 
 export interface ScreenBridgeDevice {
   serial: string;
@@ -60,40 +63,33 @@ function normalizeCodec(value: unknown): string | null {
   return null;
 }
 
-/** Separa las unidades NAL de un buffer Annex B (start codes 00 00 01 / 00 00 00 01). */
-function annexbNalUnits(bytes: Uint8Array): Uint8Array[] {
-  const units: Uint8Array[] = [];
-  const total = bytes.length;
-  let start = -1;
+/**
+ * Detección best-effort de keyframe en Annex B, sin allocations (early-exit).
+ * Devuelve null si no se puede analizar (en ese caso el llamante decide).
+ */
+function looksLikeKeyFrame(bytes: Uint8Array, codec: string): boolean | null {
+  let sawAnyNal = false;
   let cursor = 0;
+  const total = bytes.length;
   while (cursor < total - 2) {
     if (bytes[cursor] === 0 && bytes[cursor + 1] === 0 && bytes[cursor + 2] === 1) {
-      if (start >= 0) units.push(bytes.subarray(start, cursor));
-      start = cursor + 3;
+      const nalPos = cursor + 3;
+      if (nalPos < total) {
+        sawAnyNal = true;
+        const firstByte = bytes[nalPos];
+        if (codec === HEVC_CODEC_STRING) {
+          const nalType = (firstByte >> 1) & 0x3f;
+          if (nalType >= 16 && nalType <= 21) return true; // BLA / IDR / CRA
+        } else if ((firstByte & 0x1f) === 5) {
+          return true; // H.264 IDR
+        }
+      }
       cursor += 3;
     } else {
       cursor += 1;
     }
   }
-  if (start >= 0) units.push(bytes.subarray(start));
-  return units;
-}
-
-/**
- * Detección best-effort de keyframe en Annex B.
- * Devuelve null si no se puede analizar (en ese caso el llamante decide).
- */
-function looksLikeKeyFrame(bytes: Uint8Array, codec: string): boolean | null {
-  const units = annexbNalUnits(bytes);
-  if (!units.length) return null;
-  if (codec === HEVC_CODEC_STRING) {
-    return units.some((unit) => {
-      if (unit.length < 2) return false;
-      const nalType = (unit[1] >> 1) & 0x3f;
-      return nalType >= 16 && nalType <= 21; // BLA / IDR / CRA
-    });
-  }
-  return units.some((unit) => unit.length >= 1 && (unit[0] & 0x1f) === 5); // H.264 IDR
+  return sawAnyNal ? false : null;
 }
 
 /**
@@ -175,6 +171,9 @@ export function DeviceLiveView({ bridgeUrl, deviceAlias, onClose }: { bridgeUrl:
   const fpsIntervalRef = useRef<number | null>(null);
   const connectTimeoutRef = useRef<number | null>(null);
   const autoResolvedRef = useRef(false);
+  const pendingFrameRef = useRef<VideoFrame | null>(null);
+  const rafRef = useRef<number | null>(null);
+  const ctxRef = useRef<CanvasRenderingContext2D | null>(null);
 
   /** Cierra socket, decodificador y timers. Segura de llamar varias veces. */
   const teardown = useCallback(() => {
@@ -186,6 +185,12 @@ export function DeviceLiveView({ bridgeUrl, deviceAlias, onClose }: { bridgeUrl:
       window.clearInterval(fpsIntervalRef.current);
       fpsIntervalRef.current = null;
     }
+    if (rafRef.current !== null) {
+      window.cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
+    }
+    pendingFrameRef.current?.close();
+    pendingFrameRef.current = null;
     const socket = wsRef.current;
     wsRef.current = null;
     if (socket && (socket.readyState === 0 || socket.readyState === 1)) socket.close();
@@ -215,6 +220,9 @@ export function DeviceLiveView({ bridgeUrl, deviceAlias, onClose }: { bridgeUrl:
     let lastFpsTick = 0;
     let lastTimestamp = 0;
     let codecString = AVC_CODEC_STRING;
+    let resyncPending = false;
+    let decodeErrors = 0;
+    let decoderConfig: VideoDecoderConfig | null = null;
 
     const fail = (message: string) => {
       teardown();
@@ -222,26 +230,83 @@ export function DeviceLiveView({ bridgeUrl, deviceAlias, onClose }: { bridgeUrl:
       setErrorMessage(message);
     };
 
-    const drawFrame = (frame: VideoFrame) => {
+    /** Render alineado a vsync: siempre gana el cuadro más fresco. */
+    const render = () => {
+      rafRef.current = null;
+      const frame = pendingFrameRef.current;
+      pendingFrameRef.current = null;
+      if (!frame) return;
       const canvas = canvasRef.current;
-      const context = canvas?.getContext("2d");
-      if (canvas && context) {
+      const ctx = (ctxRef.current ??= canvas?.getContext("2d", { alpha: false, desynchronized: true }) ?? null);
+      if (canvas && ctx) {
         if (canvas.width !== frame.displayWidth) canvas.width = frame.displayWidth;
         if (canvas.height !== frame.displayHeight) canvas.height = frame.displayHeight;
         // El escalado real lo hace CSS con object-fit: contain.
-        context.drawImage(frame, 0, 0, canvas.width, canvas.height);
+        ctx.drawImage(frame, 0, 0, canvas.width, canvas.height);
       }
       frame.close();
       decodedFrames += 1;
       if (decodedFrames === 1) setPhase("live");
     };
 
+    const onDecoderOutput = (frame: VideoFrame) => {
+      pendingFrameRef.current?.close(); // descarta el anterior: mínima latencia de display
+      pendingFrameRef.current = frame;
+      if (rafRef.current === null) rafRef.current = window.requestAnimationFrame(render);
+    };
+
+    const buildDecoder = () => {
+      if (!decoderConfig) return;
+      decoder = new VideoDecoder({
+        output: onDecoderOutput,
+        error: () => {
+          // Un gap de deltas puede romper el decode: re-armamos y esperamos el
+          // próximo IDR. Solo rendimos tras errores persistentes.
+          decodeErrors += 1;
+          if (decodeErrors > 5 || wsRef.current === null) {
+            teardown();
+            setPhase("error");
+            setErrorMessage("Error de decodificación de video persistente.");
+            return;
+          }
+          try {
+            decoder?.close();
+          } catch {
+            /* ya estaba cerrado */
+          }
+          keySeen = false;
+          resyncPending = false;
+          buildDecoder();
+        },
+      });
+      decoder.configure(decoderConfig);
+      decoderRef.current = decoder;
+    };
+
     const feed = (bytes: Uint8Array, isKey: boolean) => {
       if (!decoder || decoder.state !== "configured") return;
+      // Backpressure: si la cola de decode crece, descartamos deltas hasta el
+      // próximo IDR y reseteamos para volver al borde en vivo sin acumular latencia.
+      if (!isKey && decoder.decodeQueueSize >= MAX_DECODE_QUEUE) {
+        resyncPending = true;
+        return;
+      }
+      if (isKey && resyncPending) {
+        try {
+          decoder.reset(); // tira la cola atrasada; vuelve a "configured"
+        } catch {
+          /* si falla, el error handler rearma */
+        }
+        resyncPending = false;
+      }
       let timestamp = Math.round(performance.now() * 1000);
       if (timestamp <= lastTimestamp) timestamp = lastTimestamp + 1;
       lastTimestamp = timestamp;
-      decoder.decode(new EncodedVideoChunk({ type: isKey ? "key" : "delta", timestamp, data: bytes }));
+      try {
+        decoder.decode(new EncodedVideoChunk({ type: isKey ? "key" : "delta", timestamp, data: bytes }));
+      } catch {
+        // Carrera con el reset/rearme del resync: se recupera solo con el próximo IDR.
+      }
     };
 
     try {
@@ -279,12 +344,8 @@ export function DeviceLiveView({ bridgeUrl, deviceAlias, onClose }: { bridgeUrl:
           try {
             const config: VideoDecoderConfig = { codec, optimizeForLatency: true };
             if (header.description) config.description = base64ToBytes(header.description);
-            decoder = new VideoDecoder({
-              output: drawFrame,
-              error: (cause) => fail(cause instanceof Error ? cause.message : "Error de decodificación de video."),
-            });
-            decoder.configure(config);
-            decoderRef.current = decoder;
+            decoderConfig = config;
+            buildDecoder();
             lastFpsTick = decodedFrames;
             fpsIntervalRef.current = window.setInterval(() => {
               setFps(decodedFrames - lastFpsTick);
