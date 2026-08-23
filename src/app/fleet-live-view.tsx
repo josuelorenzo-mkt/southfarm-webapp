@@ -76,6 +76,15 @@ function toWsUrl(bridgeUrl: string): string {
   return bridgeBase(bridgeUrl).replace(/^http/i, "ws");
 }
 
+// Token opcional del bridge (para cuando está expuesto por túnel fuera de la LAN).
+// Si no está definido, el bridge queda en modo LAN abierta y no se manda nada.
+const BRIDGE_TOKEN = process.env.NEXT_PUBLIC_SCREEN_BRIDGE_TOKEN || "";
+
+function withToken(url: string): string {
+  if (!BRIDGE_TOKEN) return url;
+  return `${url}${url.includes("?") ? "&" : "?"}token=${encodeURIComponent(BRIDGE_TOKEN)}`;
+}
+
 function base64ToBytes(value: string): Uint8Array {
   const binary = atob(value);
   const bytes = new Uint8Array(binary.length);
@@ -136,8 +145,8 @@ export function useScreenBridgeDevices(bridgeUrl: string): ScreenBridgeState {
     const load = async () => {
       try {
         const [healthResponse, devicesResponse] = await Promise.all([
-          fetch(`${base}/api/health`, { cache: "no-store", signal: controller.signal }),
-          fetch(`${base}/api/devices`, { cache: "no-store", signal: controller.signal }),
+          fetch(withToken(`${base}/api/health`), { cache: "no-store", signal: controller.signal }),
+          fetch(withToken(`${base}/api/devices`), { cache: "no-store", signal: controller.signal }),
         ]);
         if (!healthResponse.ok || !devicesResponse.ok) {
           throw new Error(`El bridge respondió con error HTTP ${(devicesResponse.ok ? healthResponse : devicesResponse).status}.`);
@@ -442,7 +451,7 @@ export function DeviceLiveView({ bridgeUrl, deviceAlias, onClose }: { bridgeUrl:
     };
 
     try {
-      const socket = new WebSocket(`${toWsUrl(bridgeUrl)}/ws/stream/${encodeURIComponent(targetSerial)}`);
+      const socket = new WebSocket(withToken(`${toWsUrl(bridgeUrl)}/ws/stream/${encodeURIComponent(targetSerial)}`));
       socket.binaryType = "arraybuffer";
       wsRef.current = socket;
 
