@@ -653,7 +653,12 @@ export function DeviceLiveView({ bridgeUrl, deviceAlias, onClose }: { bridgeUrl:
             <><span className="cc-live-spinner" aria-hidden="true" /><span>{recoveringView ? "Recuperando…" : "Conectando…"}</span></>
           )}
           {serial && (phase === "live" || phase === "connecting") && (
-            <button type="button" className="cc-live-reconnect" title="Forzar reconexión" aria-label="Forzar reconexión de la vista en vivo" onClick={forceReconnect}>⟳</button>
+            <button type="button" className="cc-live-reconnect" title="Forzar reconexión" aria-label="Forzar reconexión de la vista en vivo" onClick={forceReconnect}>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M23 4v6h-6" />
+                <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
+              </svg>
+            </button>
           )}
           <button type="button" className="cc-live-close" title="Cerrar vista en vivo" aria-label="Cerrar vista en vivo" onClick={stopAndClose}>×</button>
         </div>
