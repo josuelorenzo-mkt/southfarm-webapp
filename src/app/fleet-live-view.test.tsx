@@ -321,6 +321,24 @@ describe("Vista en vivo de Device Fleet", () => {
     expect(screen.queryByText(/Sin señal/i)).toBeNull();
   });
 
+  it("el botón ⟳ fuerza una reconexión inmediata con conexión nueva", async () => {
+    const socket = await goLive();
+    const btn = screen.getByRole("button", { name: "Forzar reconexión de la vista en vivo" });
+    await act(async () => {
+      btn.click();
+    });
+    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(2), { timeout: 4000 });
+    const secondSocket = MockWebSocket.instances[1];
+    expect(secondSocket.url).toBe("ws://localhost:8100/ws/stream/SER-1");
+    expect(secondSocket).not.toBe(socket);
+    await act(async () => {
+      secondSocket.serverAccept();
+      secondSocket.serverText(JSON.stringify({ codec: "h264", description: null }));
+      secondSocket.serverBinary(keyFrameBuffer());
+    });
+    expect(await screen.findByText("EN VIVO")).toBeTruthy();
+  });
+
   it('maneja {type:"waiting"} como recuperación sin cortar la conexión y expone data-*', async () => {
     const socket = await goLive();
     const panel = panelElement();

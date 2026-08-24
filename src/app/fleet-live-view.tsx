@@ -616,6 +616,13 @@ export function DeviceLiveView({ bridgeUrl, deviceAlias, onClose }: { bridgeUrl:
     onClose();
   }, [teardown, onClose]);
 
+  /** Botón ⟳: corta la conexión actual y reconecta al instante, sin esperar backoff. */
+  const forceReconnect = useCallback(() => {
+    if (!serial) return;
+    reconnectAttemptsRef.current = 0; // reconexión manual: backoff fresco
+    startStream(serial); // startStream ya hace teardown y resetea fases
+  }, [serial, startStream]);
+
   const confirmManualSerial = () => {
     if (!pickedSerial) return;
     setSerial(pickedSerial);
@@ -644,6 +651,9 @@ export function DeviceLiveView({ bridgeUrl, deviceAlias, onClose }: { bridgeUrl:
           )}
           {(phase === "connecting" || recoveringView) && (
             <><span className="cc-live-spinner" aria-hidden="true" /><span>{recoveringView ? "Recuperando…" : "Conectando…"}</span></>
+          )}
+          {serial && (phase === "live" || phase === "connecting") && (
+            <button type="button" className="cc-live-reconnect" title="Forzar reconexión" aria-label="Forzar reconexión de la vista en vivo" onClick={forceReconnect}>⟳</button>
           )}
           <button type="button" className="cc-live-close" title="Cerrar vista en vivo" aria-label="Cerrar vista en vivo" onClick={stopAndClose}>×</button>
         </div>
