@@ -7,11 +7,14 @@ export interface AuthSessionPayload {
 export class AuthApiError extends Error {
   status: number;
   error_code?: string;
+  /** Cuerpo completo del error cuando la API manda detalles extra (ej. 409 con conflicts/next_free_slot). */
+  data?: Record<string, unknown>;
 
-  constructor(message: string, status: number, error_code?: string) {
+  constructor(message: string, status: number, error_code?: string, data?: Record<string, unknown>) {
     super(message);
     this.status = status;
     if (error_code !== undefined) this.error_code = error_code;
+    if (data !== undefined) this.data = data;
   }
 }
 
@@ -99,6 +102,7 @@ export async function authRequest<T>(
       typeof errorPayload.error === 'string' ? errorPayload.error : 'No se pudo completar la solicitud',
       response.status,
       typeof errorPayload.error_code === 'string' ? errorPayload.error_code : undefined,
+      errorPayload,
     );
   }
   return data as T;

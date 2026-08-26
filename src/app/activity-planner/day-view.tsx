@@ -205,6 +205,10 @@ export default function DayView({ token, date, day, canManage, onBackToWeek, onP
   const [dragSource, setDragSource] = useState<DayTask | null>(null);
   const [dragOverHour, setDragOverHour] = useState<number | null>(null);
   const [confirmTarget, setConfirmTarget] = useState<{ task: DayTask; hour: number } | null>(null);
+  /** Fase 2: hora elegida en el modal de movimiento ("HH:MM", default la hora del drop). */
+  const [moveTime, setMoveTime] = useState("12:00");
+  /** Fase 2: choque de agenda al mover — la API devuelve 409 + próximo hueco libre. */
+  const [slotConflict, setSlotConflict] = useState<{ task: DayTask; nextFreeSlot: string } | null>(null);
   /** AHORA: timestamp actualizado cada 30 s (para el indicador del timeline). */
   const [nowIso, setNowIso] = useState<string>(() => new Date().toISOString());
   const timelineRef = useRef<HTMLDivElement | null>(null);
@@ -305,6 +309,7 @@ export default function DayView({ token, date, day, canManage, onBackToWeek, onP
   const handleDrop = (hour: number) => {
     if (!dragSource) return;
     setDragOverHour(null);
+    setMoveTime(`${String(hour).padStart(2, "0")}:00`);
     setConfirmTarget({ task: dragSource, hour });
   };
 
@@ -313,14 +318,39 @@ export default function DayView({ token, date, day, canManage, onBackToWeek, onP
     setDragOverHour(null);
   };
 
-  const confirmMove = (task: DayTask, targetHour: number) => {
+  /* Fase 2: el movimiento valida contra la agenda del teléfono en el backend
+     (reserveSlot 'reject'). Si el horario choca, el 409 trae next_free_slot y
+     se ofrece mover al hueco sugerido en lugar de fallar genéricamente. */
+  const performMove = (task: DayTask, scheduledFor: string) => {
+    void runAction(`move-${task.id}`, async () => {
+      try {
+        await plannerApi.rescheduleTask(token, task.id, scheduledFor);
+      } catch (cause) {
+        const apiError = PlannerApiError.from(cause);
+        if (apiError.slotConflict && apiError.nextFreeSlot) {
+          setConfirmTarget(null);
+          clearDrag();
+          setSlotConflict({ task, nextFreeSlot: apiError.nextFreeSlot });
+          return;
+        }
+        throw cause;
+      }
+    });
+  };
+
+  const confirmMove = (task: DayTask, time: string) => {
     setConfirmTarget(null);
     clearDrag();
     const base = task.scheduledFor ? baDateKeyOf(task.scheduledFor) : date;
-    const scheduledFor = new Date(`${base}T${String(targetHour).padStart(2, "0")}:00:00-03:00`).toISOString();
-    void runAction(`move-${task.id}`, async () => {
-      await plannerApi.rescheduleTask(token, task.id, scheduledFor);
-    });
+    const scheduledFor = new Date(`${base}T${time}:00-03:00`).toISOString();
+    performMove(task, scheduledFor);
+  };
+
+  const acceptSuggestedSlot = () => {
+    if (!slotConflict) return;
+    const { task, nextFreeSlot } = slotConflict;
+    setSlotConflict(null);
+    performMove(task, nextFreeSlot);
   };
 
   const cancelMove = () => {
@@ -532,21 +562,78 @@ export default function DayView({ token, date, day, canManage, onBackToWeek, onP
             </div>
             <div className="ap-modal-body">
               <p className="ap-hint" style={{ fontSize: 12, lineHeight: 1.6 }}>
-                ¿Estás seguro que querés mover la tarea de <strong>{formatBATime(confirmTarget.task.scheduledFor)}</strong> a{" "}
-                <strong>{String(confirmTarget.hour).padStart(2, "0")}:00</strong>?
+                Movés la tarea <strong>#{confirmTarget.task.id}</strong> ({taskName(confirmTarget.task)}) de{" "}
+                <strong>{formatBATime(confirmTarget.task.scheduledFor)}</strong> a:
               </p>
-              <p className="ap-hint">
-                Se reagenda la tarea <strong>#{confirmTarget.task.id}</strong> ({taskName(confirmTarget.task)}) al horario nuevo dentro de la ventana 12:00–22:00 BA.
-              </p>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 8 }}>
+                <input
+                  type="time"
+                  value={moveTime}
+                  min="00:00"
+                  max="23:59"
+                  step={300}
+                  aria-label="Nueva hora de la tarea"
+                  onChange={(event) => setMoveTime(event.target.value || moveTime)}
+                  style={{
+                    background: "rgba(255,255,255,.05)",
+                    border: "1px solid rgba(255,255,255,.14)",
+                    borderRadius: 8,
+                    color: "var(--text, #fff)",
+                    padding: "7px 10px",
+                    fontSize: 13,
+                  }}
+                />
+                <span style={{ color: "var(--text-dim)", fontSize: 11 }}>
+                  El teléfono valida que el horario esté libre; si choca, te ofrecemos el próximo hueco.
+                </span>
+              </div>
             </div>
             <div className="ap-modal-foot">
               <button className="ap-btn ap-btn-ghost ap-btn-sm" onClick={cancelMove}>Cancelar</button>
               <button
                 className="ap-btn ap-btn-primary ap-btn-sm"
-                disabled={Boolean(actionBusy)}
-                onClick={() => confirmMove(confirmTarget.task, confirmTarget.hour)}
+                disabled={Boolean(actionBusy) || !/^\d{2}:\d{2}$/.test(moveTime)}
+                onClick={() => confirmMove(confirmTarget.task, moveTime)}
               >
-                {actionBusy ? "Moviendo…" : "Aceptar"}
+                {actionBusy ? "Moviendo…" : "Mover tarea"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Fase 2: la API rechazó el movimiento por solape (409 + next_free_slot). */}
+      {slotConflict && (
+        <div
+          className="ap-modal-overlay"
+          role="alertdialog"
+          aria-modal="true"
+          aria-label="Conflicto de agenda"
+          onClick={(event) => { if (event.target === event.currentTarget) setSlotConflict(null); }}
+        >
+          <div className="ap-modal">
+            <div className="ap-modal-head">
+              <div>
+                <p className="ap-eyebrow ap-eyebrow-accent">TELÉFONO OCUPADO</p>
+                <h3>Ese horario ya está reservado</h3>
+              </div>
+              <button className="ap-icon-btn" title="Cerrar" onClick={() => setSlotConflict(null)}>×</button>
+            </div>
+            <div className="ap-modal-body">
+              <p className="ap-hint" style={{ fontSize: 12, lineHeight: 1.6 }}>
+                La tarea <strong>#{slotConflict.task.id}</strong> ({taskName(slotConflict.task)}) no puede moverse a las{" "}
+                <strong>{formatBATime(slotConflict.task.scheduledFor)}</strong> porque se encima con otra tarea
+                del mismo teléfono (cada tarea reserva su ventana con margen).
+              </p>
+            </div>
+            <div className="ap-modal-foot">
+              <button className="ap-btn ap-btn-ghost ap-btn-sm" onClick={() => setSlotConflict(null)}>Dejar como está</button>
+              <button
+                className="ap-btn ap-btn-primary ap-btn-sm"
+                disabled={Boolean(actionBusy)}
+                onClick={acceptSuggestedSlot}
+              >
+                {actionBusy ? "Moviendo…" : `Mover al próximo hueco · ${formatBATime(slotConflict.nextFreeSlot)}`}
               </button>
             </div>
           </div>

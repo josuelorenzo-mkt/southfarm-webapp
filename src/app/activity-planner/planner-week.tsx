@@ -630,6 +630,28 @@ export default function PlannerWeek({ token, week, canManage, onOpenCluster, onO
     });
   };
 
+  /* Fase 2: el backend valida la agenda (reserveSlot 'reject'). Si hay choque,
+     el 409 trae next_free_slot y se ofrece mover al hueco sugerido. */
+  const moveTaskTo = (task: WeekTask, scheduledFor: string) => {
+    void runAction(`move-${task.id}`, async () => {
+      try {
+        await plannerApi.rescheduleTask(token, task.id, scheduledFor);
+      } catch (cause) {
+        const apiError = PlannerApiError.from(cause);
+        if (apiError.slotConflict && apiError.nextFreeSlot) {
+          const accept = window.confirm(
+            `La tarea #${task.id} choca con otra tarea del teléfono. ¿Moverla al próximo hueco libre (${formatBATime(apiError.nextFreeSlot)})?`,
+          );
+          if (accept) {
+            await plannerApi.rescheduleTask(token, task.id, apiError.nextFreeSlot);
+            return;
+          }
+        }
+        throw cause;
+      }
+    });
+  };
+
   const moveTask = (task: WeekTask) => {
     const current = formatBATime(task.scheduledFor);
     const input = window.prompt(`Nuevo horario (HH:MM) en Buenos Aires para la tarea #${task.id}. Actual: ${current}`, current);
@@ -641,9 +663,7 @@ export default function PlannerWeek({ token, week, canManage, onOpenCluster, onO
     if (hour > 23 || minute > 59) { setError("Horario fuera de rango."); return; }
     const dateKey = task.scheduledFor ? baDateKeyOf(task.scheduledFor) : todayKey;
     const scheduledFor = new Date(`${dateKey}T${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}:00-03:00`).toISOString();
-    void runAction(`move-${task.id}`, async () => {
-      await plannerApi.rescheduleTask(token, task.id, scheduledFor);
-    });
+    moveTaskTo(task, scheduledFor);
   };
 
   return (

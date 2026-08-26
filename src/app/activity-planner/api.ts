@@ -31,19 +31,33 @@ function plannerRequest<T>(path: string, token: string, init: RequestInit = {}):
 export class PlannerApiError extends Error {
   status: number;
   error_code?: string;
+  /** Cuerpo completo del error (ej. 409 de agenda con conflicts + next_free_slot). */
+  data?: Record<string, unknown>;
 
-  constructor(message: string, status: number, error_code?: string) {
+  constructor(message: string, status: number, error_code?: string, data?: Record<string, unknown>) {
     super(message);
     this.status = status;
     if (error_code !== undefined) this.error_code = error_code;
+    if (data !== undefined) this.data = data;
   }
 
   static from(cause: unknown): PlannerApiError {
     if (cause instanceof PlannerApiError) return cause;
     if (cause instanceof AuthApiError) {
-      return new PlannerApiError(cause.message, cause.status, cause.error_code);
+      return new PlannerApiError(cause.message, cause.status, cause.error_code, cause.data);
     }
     return new PlannerApiError(cause instanceof Error ? cause.message : "No se pudo completar la solicitud", 0);
+  }
+
+  /** True si el error es un choque de agenda del sistema de reservas. */
+  get slotConflict(): boolean {
+    return this.status === 409 && Array.isArray(this.data?.conflicts);
+  }
+
+  /** Próximo hueco libre sugerido por la API (ISO) en un conflicto de agenda. */
+  get nextFreeSlot(): string | null {
+    const value = this.data?.next_free_slot;
+    return typeof value === "string" && value ? value : null;
   }
 }
 
