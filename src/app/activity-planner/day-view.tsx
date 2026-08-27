@@ -9,7 +9,7 @@
  * drag & drop por tarea INDIVIDUAL con modal de confirmación.
  */
 import "./planner-extra.css";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { plannerApi, PlannerApiError, type CascadeMoveDto } from "./api";
 import {
@@ -99,10 +99,32 @@ function baTimeOfMinutes(minutes: number): string {
   return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
 }
 
-/** Progreso del AHORA dentro de la ventana 12:00–22:00 BA (0..1); fuera de rango devuelve <0 o >1. */
-function nowProgress(nowIso: string): number {
+/**
+ * Posición EN PÍXELES del marcador AHORA sobre la columna interna del timeline.
+ * Se mide con los offsets reales de las filas de cada hora (data-hour), así que
+ * da la hora exacta aunque una fila se haya estirado por tener muchas tareas.
+ * Devuelve null si la hora actual está fuera de la ventana 12:00–22:00 BA.
+ */
+function calcNowMarkerPx(inner: HTMLElement | null, nowIso: string): number | null {
+  if (!inner) return null;
   const minutes = baMinutesOf(nowIso);
-  return (minutes - WINDOW_START_MIN) / (WINDOW_END_MIN - WINDOW_START_MIN);
+  if (minutes < WINDOW_START_MIN || minutes >= WINDOW_END_MIN + 60) return null;
+  const nowHour = Math.floor(minutes / 60);
+  const fraction = (minutes - nowHour * 60) / 60;
+  let topPx: number | null = null;
+  for (const row of Array.from(inner.children) as HTMLElement[]) {
+    const rowHour = Number((row as HTMLElement).dataset.hour);
+    if (!Number.isInteger(rowHour)) continue;
+    if (rowHour < nowHour) {
+      topPx = (topPx ?? 0) + row.offsetHeight;
+    } else if (rowHour === nowHour) {
+      const basePx: number = topPx ?? 0;
+      topPx = basePx + row.offsetHeight * fraction;
+    } else if (topPx !== null) {
+      break;
+    }
+  }
+  return topPx;
 }
 
 interface TaskBlockProps {
@@ -112,6 +134,15 @@ interface TaskBlockProps {
   onCancel: (task: DayTask) => void;
   onDragStart: (task: DayTask) => void;
   onDragEnd: () => void;
+}
+
+/** Color estable por teléfono: al mirar la franja horaria se distingue de un
+    vistazo si dos tarjetas de la misma hora son de teléfonos DISTINTOS. */
+function deviceColor(alias: string | null | undefined): string {
+  if (!alias) return "rgba(255,255,255,.28)";
+  let hash = 0;
+  for (let i = 0; i < alias.length; i += 1) hash = (hash * 31 + alias.charCodeAt(i)) % 360;
+  return `hsl(${hash} 70% 60%)`;
 }
 
 function TaskBlock({ task, canManage, actionBusy, onCancel, onDragStart, onDragEnd }: TaskBlockProps) {
@@ -131,8 +162,10 @@ function TaskBlock({ task, canManage, actionBusy, onCancel, onDragStart, onDragE
   return (
     <div
       className={`ap-task t-${kind} ${stateClass}`}
+      style={{ borderLeft: `3px solid ${deviceColor(task.deviceAlias || null)}` }}
       data-type={kind}
       data-status={task.status}
+      title={task.deviceAlias ? `Teléfono ${task.deviceAlias}` : undefined}
       draggable={canManage && editable && !actionBusy}
       onDragStart={(event) => {
         onDragStart(task);
@@ -214,26 +247,15 @@ export default function DayView({ token, date, day, canManage, onBackToWeek, onP
   /** AHORA: timestamp actualizado cada 30 s (para el indicador del timeline). */
   const [nowIso, setNowIso] = useState<string>(() => new Date().toISOString());
   const timelineRef = useRef<HTMLDivElement | null>(null);
+  const timelineInnerRef = useRef<HTMLDivElement | null>(null);
   const scrolledToNowRef = useRef(false);
+  /** Fase 2.5-fix: posición px-real del marcador AHORA (medida sobre las filas). */
+  const [nowMarkerPx, setNowMarkerPx] = useState<number | null>(null);
 
   useEffect(() => {
     const interval = window.setInterval(() => setNowIso(new Date().toISOString()), NOW_REFRESH_MS);
     return () => window.clearInterval(interval);
   }, []);
-
-  /* Auto-scroll suave a la posición actual al montar (una sola vez). */
-  useEffect(() => {
-    if (scrolledToNowRef.current) return;
-    const task = window.setTimeout(() => {
-      const timeline = timelineRef.current;
-      if (!timeline) return;
-      const pct = nowProgress(nowIso);
-      if (pct < 0 || pct > 1) return; // fuera de la ventana 12:00–22:00: no se fuerza scroll
-      timeline.scrollTo({ top: pct * (timeline.scrollHeight - timeline.clientHeight), behavior: "smooth" });
-      scrolledToNowRef.current = true;
-    }, 0);
-    return () => window.clearTimeout(task);
-  }, [nowIso]);
 
   const toggleFilter = (key: "warmup" | "scan" | "publish" | "late") => {
     setFilters((current) => ({ ...current, [key]: !current[key] }));
@@ -266,6 +288,27 @@ export default function DayView({ token, date, day, canManage, onBackToWeek, onP
   }, [visibleTasks]);
 
   const running = day.tasks.filter((task) => task.status === "running");
+
+  /* Marcador AHORA en píxeles reales: se recalcula cuando cambian las filas
+     (carga del día, tarjetas movidas) o cada tick de 30 s. Las horas cargadas
+     estiran su fila y la medición de offsets lo absorbe sin perder exactitud. */
+  useLayoutEffect(() => {
+    setNowMarkerPx(calcNowMarkerPx(timelineInnerRef.current, nowIso));
+  }, [byHour, nowIso, visibleTasks.length]);
+
+  /* Auto-scroll suave a la posición actual al montar (una sola vez). */
+  useEffect(() => {
+    if (scrolledToNowRef.current) return;
+    const task = window.setTimeout(() => {
+      const timeline = timelineRef.current;
+      if (!timeline) return;
+      const px = calcNowMarkerPx(timelineInnerRef.current, nowIso);
+      if (px === null) return; // fuera de la ventana 12:00–22:00: no se fuerza scroll
+      timeline.scrollTo({ top: Math.max(0, px - timeline.clientHeight / 2), behavior: "smooth" });
+      scrolledToNowRef.current = true;
+    }, 0);
+    return () => window.clearTimeout(task);
+  }, [nowIso]);
   const completed = day.tasks.filter((task) => task.status === "completed");
   const queued = day.tasks.filter((task) => ["pending", "paused"].includes(task.status));
   const late = day.tasks.filter((task) => task.status === "overdue" || task.status === "expired");
@@ -275,12 +318,6 @@ export default function DayView({ token, date, day, canManage, onBackToWeek, onP
     return Math.max(...counts, 1);
   }, [day.hourly]);
 
-  /* Progreso del AHORA dentro de la ventana 12:00–22:00 (0..1), con clamp
-     atenuado si está fuera de rango (pct < 0 o > 1). */
-  const nowMinutes = baMinutesOf(nowIso);
-  const nowProgressValue = (nowMinutes - WINDOW_START_MIN) / (WINDOW_END_MIN - WINDOW_START_MIN);
-  const nowPct = Math.min(1, Math.max(0, nowProgressValue));
-  const nowOutOfRange = nowProgressValue < 0 || nowProgressValue > 1;
 
   const runAction = async (key: string, action: () => Promise<void>) => {
     setActionBusy(key);
@@ -472,17 +509,17 @@ export default function DayView({ token, date, day, canManage, onBackToWeek, onP
             <span className="ap-badge ap-badge-live"><span className="ap-badge-dot" />{running.length} ejecutando</span>
           </div>
           <div className="ap-timeline-scroll" ref={timelineRef} role="region" aria-label="Timeline del día, scrolleable">
-            <div className="ap-timeline">
+            <div className="ap-timeline" ref={timelineInnerRef}>
               {HOURS.map((hour) => {
                 const hourTasks = byHour.get(hour) || [];
                 const now = isNowInHour(hour, nowIso);
                 const isDropTarget = dragSource != null && dragOverHour === hour;
                 return (
-                  <div className={`ap-hour ${now ? "is-now" : ""}`} key={hour}>
+                  <div className={`ap-hour ${now ? "is-now" : ""}`} key={hour} data-hour={hour}>
                     <span className="ap-hour-label">{String(hour).padStart(2, "0")}:00</span>
                     <div
                       className={`ap-hour-tasks ${isDropTarget ? "is-drop-target" : ""}`}
-                      style={isDropTarget ? { border: "1px dashed rgba(34,197,94,.55)", borderRadius: 10, background: "rgba(34,197,94,.06)", minHeight: 40 } : undefined}
+                      style={isDropTarget ? { background: "rgba(34,197,94,.05)", borderRadius: 10, minHeight: 40 } : undefined}
                       onDragOver={(event) => {
                         if (!dragSource) return;
                         event.preventDefault();
@@ -519,16 +556,19 @@ export default function DayView({ token, date, day, canManage, onBackToWeek, onP
                   </div>
                 );
               })}
-              {/* Indicador AHORA: línea vertical proporcional entre 12:00–22:00 BA,
-                  con clamp atenuado si la hora actual está fuera de la ventana. */}
-              <div
-                className={`ap-now-marker ${nowOutOfRange ? "is-out-of-range" : ""}`}
-                style={{ top: `calc(${(nowPct * 100).toFixed(2)}% - 1px)` }}
-                role="status"
-                aria-label={`Ahora: ${baTimeOfMinutes(nowMinutes)} Buenos Aires`}
-              >
-                <span>AHORA · {baTimeOfMinutes(nowMinutes)}</span>
-              </div>
+              {/* Indicador AHORA: posición px-real medida sobre las filas
+                  (data-hour), exacta incluso si una hora cargada se estira.
+                  Fuera de la ventana 12–22 ahoraMarkerPx es null y se oculta. */}
+              {nowMarkerPx !== null && (
+                <div
+                  className="ap-now-marker"
+                  style={{ top: `${Math.max(0, nowMarkerPx - 1)}px` }}
+                  role="status"
+                  aria-label={`Ahora: ${baTimeOfMinutes(baMinutesOf(nowIso))} Buenos Aires`}
+                >
+                  <span>AHORA · {baTimeOfMinutes(baMinutesOf(nowIso))}</span>
+                </div>
+              )}
             </div>
           </div>
         </section>
