@@ -117,10 +117,11 @@ function baTimeOfMinutes(minutes: number): string {
  * Posición px del marcador AHORA sobre el track absoluto: matemática directa
  * (minutos transcurridos × escala). Fuera de 12–22 BA devuelve null (oculto).
  */
-function nowMarkerTopPx(nowIso: string): number | null {
+function nowMarkerTopPx(nowIso: string): { px: number; outOfRange: boolean } {
   const minutes = baMinutesOf(nowIso);
-  if (minutes < WINDOW_START_MIN || minutes >= WINDOW_END_MIN) return null;
-  return minuteToPx(minutes);
+  if (minutes < WINDOW_START_MIN) return { px: 0, outOfRange: true };
+  if (minutes >= WINDOW_END_MIN) return { px: TRACK_HEIGHT_PX, outOfRange: true };
+  return { px: minuteToPx(minutes), outOfRange: false };
 }
 
 interface LaidOutTask {
@@ -319,8 +320,10 @@ export default function DayView({ token, date, day, canManage, clusterId = null,
   const queued = day.tasks.filter((task) => ["pending", "paused"].includes(task.status));
   const late = day.tasks.filter((task) => task.status === "overdue" || task.status === "expired");
 
-  /* Marcador AHORA: derivado en render — matemática directa minutos × escala px. */
-  const nowMarkerPos = nowMarkerTopPx(nowIso);
+  /* Marcador AHORA: derivado en render — matemática directa minutos × escala px.
+     Fuera de la ventana 12–22 queda ANCLADO al borde correspondiente, atenuado,
+     para seguir dando referencia del momento del día. */
+  const nowMarkerState = nowMarkerTopPx(nowIso);
 
   /* Auto-scroll suave a la posición actual al montar (una sola vez). */
   useEffect(() => {
@@ -328,8 +331,9 @@ export default function DayView({ token, date, day, canManage, clusterId = null,
     const task = window.setTimeout(() => {
       const timeline = timelineRef.current;
       if (!timeline) return;
-      const px = nowMarkerTopPx(nowIso);
-      if (px === null) return; // fuera de la ventana 12:00–22:00: no se fuerza scroll
+      const marker = nowMarkerTopPx(nowIso);
+      if (marker.outOfRange) return; // fuera de la ventana 12:00–22:00: no se fuerza scroll
+      const px = marker.px;
       timeline.scrollTo({ top: Math.max(0, px - timeline.clientHeight / 3), behavior: "smooth" });
       scrolledToNowRef.current = true;
     }, 0);
@@ -581,26 +585,28 @@ export default function DayView({ token, date, day, canManage, clusterId = null,
               onDragLeave={handleTrackDragLeave}
               onDrop={handleTrackDrop}
             >
-              {/* Regla: gridlines absolutas por hora — la esquina superior de
-                  cada tarjeta SIEMPRE cae exactamente en su hora/minuto. */}
+              {/* Regla: gridlines absolutas por hora con rótulo-chip adentro
+                  del track — la esquina superior de cada tarjeta SIEMPRE cae
+                  exactamente en su hora/minuto, sin depender del gutter. */}
               {HOURS.map((hour) => (
                 <div className="ap-hour-gridline" key={hour} style={{ top: minuteToPx(hour * 60) }}>
-                  <span>{String(hour).padStart(2, "0")}:00</span>
+                  <span className={hour === HOURS[0] ? "is-first" : ""}>{String(hour).padStart(2, "0")}:00</span>
                 </div>
               ))}
 
-              {/* Casilleros de 5 minutos estilo liquid glass (solo al arrastrar). */}
-              {dragSource && (
+              {/* Casilleros de 5 minutos SIEMPRE visibles (suaves); al arrastrar
+                  se intensifican y la franja bajo el cursor se ilumina. */}
+              <div className="ap-slot-overlay" aria-hidden="true" />
+              {dragSource && dragSnapMin !== null && (
                 <>
-                  <div className="ap-slot-overlay" aria-hidden="true" />
-                  {dragSnapMin !== null && (
-                    <>
-                      <div className="ap-drop-guide" style={{ top: minuteToPx(dragSnapMin) }} />
-                      <div className="ap-drag-badge" style={{ top: minuteToPx(dragSnapMin) }} role="status">
-                        <span>{formatMinuteOf(dragSnapMin)}</span>
-                      </div>
-                    </>
-                  )}
+                  <div
+                    className="ap-drop-band"
+                    style={{ top: minuteToPx(dragSnapMin), height: DROP_SNAP_MIN * PX_PER_MIN }}
+                  />
+                  <div className="ap-drop-guide" style={{ top: minuteToPx(dragSnapMin) }} />
+                  <div className="ap-drag-badge" style={{ top: minuteToPx(dragSnapMin) }} role="status">
+                    <span>{formatMinuteOf(dragSnapMin)}</span>
+                  </div>
                 </>
               )}
 
@@ -626,16 +632,14 @@ export default function DayView({ token, date, day, canManage, clusterId = null,
               ))}
 
               {/* Indicador AHORA sobre la escala real del track. */}
-              {nowMarkerPos !== null && (
-                <div
-                  className="ap-now-marker"
-                  style={{ top: `${Math.max(0, nowMarkerPos - 1)}px` }}
-                  role="status"
-                  aria-label={`Ahora: ${baTimeOfMinutes(baMinutesOf(nowIso))} Buenos Aires`}
-                >
-                  <span>AHORA · {baTimeOfMinutes(baMinutesOf(nowIso))}</span>
-                </div>
-              )}
+              <div
+                className={`ap-now-marker ${nowMarkerState.outOfRange ? "is-out-of-range" : ""}`}
+                style={{ top: `${Math.max(0, Math.min(TRACK_HEIGHT_PX, nowMarkerState.px) - 1)}px` }}
+                role="status"
+                aria-label={`Ahora: ${baTimeOfMinutes(baMinutesOf(nowIso))} Buenos Aires`}
+              >
+                <span>AHORA · {baTimeOfMinutes(baMinutesOf(nowIso))}</span>
+              </div>
             </div>
           </div>
         </section>
