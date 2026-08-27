@@ -216,6 +216,7 @@ export const plannerApi = {
   createTask(token: string, body: {
     task_type: string;
     device_id: number | string;
+    cluster_id?: number;
     scheduled_for: string;
     duration_minutes?: number;
     social_account_id?: number;

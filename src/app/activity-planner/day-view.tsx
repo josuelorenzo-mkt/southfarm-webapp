@@ -694,6 +694,7 @@ export default function DayView({ token, date, day, canManage, clusterId = null,
           {clusterId != null && (
             <QuickAddPanel
               token={token}
+              clusterId={clusterId}
               clusterName={clusterName || `Clúster #${clusterId}`}
               accounts={clusterAccounts}
               workspaceAccounts={workspaceAccounts}

@@ -19,6 +19,8 @@ import type { ClusterAccount } from "./types";
 
 interface QuickAddPanelProps {
   token: string;
+  /** Clúster actual: las tareas creadas quedan asociadas para la vista día de clúster. */
+  clusterId: number;
   clusterName: string;
   /** Cuentas del clúster (week payload). */
   accounts: ClusterAccount[];
@@ -40,7 +42,7 @@ function defaultTimeBA(): string {
   return `${String(hour % 24).padStart(2, "0")}:${String(minute % 60).padStart(2, "0")}`;
 }
 
-export default function QuickAddPanel({ token, clusterName, accounts, workspaceAccounts, date, onChanged }: QuickAddPanelProps) {
+export default function QuickAddPanel({ token, clusterId, clusterName, accounts, workspaceAccounts, date, onChanged }: QuickAddPanelProps) {
   const [actionType, setActionType] = useState<"warmup" | "scan">("warmup");
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
   const [time, setTime] = useState<string>(() => defaultTimeBA());
@@ -91,6 +93,7 @@ export default function QuickAddPanel({ token, clusterName, accounts, workspaceA
           const created = await plannerApi.createTask(token, {
             task_type: taskTypeFor(account.platform),
             device_id: deviceId,
+            cluster_id: clusterId,
             scheduled_for: targetIso,
             duration_minutes: actionType === "scan" ? 10 : durationMin,
             social_account_id: Number(account.id),
