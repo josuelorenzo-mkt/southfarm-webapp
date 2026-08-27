@@ -65,8 +65,14 @@ export default function QuickAddPanel({ token, clusterName, accounts, workspaceA
     setSelectedIds((current) => current.includes(id) ? current.filter((value) => value !== id) : [...current, id]);
   };
 
-  const taskTypeFor = (platform: string): string =>
-    actionType === "scan" ? `scan_${platform}` : `warmup_${platform}`;
+  // OJO: los tipos reales son warmup_ig (no warmup_instagram), warmup_tiktok,
+  // warmup_youtube; los scans sí se llaman scan_<plataforma>.
+  const taskTypeFor = (platform: string): string => {
+    if (actionType === "scan") return `scan_${platform}`;
+    if (platform === "tiktok") return "warmup_tiktok";
+    if (platform === "youtube") return "warmup_youtube";
+    return "warmup_ig";
+  };
 
   const submit = async () => {
     setError("");
