@@ -29,8 +29,6 @@ interface QuickAddPanelProps {
   onChanged: () => void;
 }
 
-const WARMUP_DURATIONS = [30, 40, 60];
-
 /** Hora BA actual + 30 min, redondeada a 5', como default del input. */
 function defaultTimeBA(): string {
   const parts = new Intl.DateTimeFormat("en-US", {
@@ -132,10 +130,17 @@ export default function QuickAddPanel({ token, clusterName, accounts, workspaceA
             <button disabled title="La publicación necesita un video: usá 'Crear publicación' o la sección Rutinas">Publicación</button>
           </div>
           {actionType === "warmup" && (
-            <div className="ap-qa-seg" role="group" aria-label="Duración del warmup">
-              {WARMUP_DURATIONS.map((minutes) => (
-                <button key={minutes} className={durationMin === minutes ? "is-on" : ""} onClick={() => setDurationMin(minutes)}>{minutes}′</button>
-              ))}
+            <div className="ap-qa-slider">
+              <input
+                type="range"
+                min={5}
+                max={60}
+                step={5}
+                value={durationMin}
+                aria-label="Duración del warmup en minutos"
+                onChange={(event) => setDurationMin(Number(event.target.value))}
+              />
+              <span className="ap-qa-slider-value">{durationMin} min</span>
             </div>
           )}
           {actionType === "scan" && <span className="ap-qa-note">10 min</span>}
