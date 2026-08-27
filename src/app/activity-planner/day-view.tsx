@@ -31,7 +31,8 @@ const WINDOW_END_MIN = 22 * 60;
 /** Fase 2.5-visual: el timeline se posiciona ABSOLUTAMENTE por minuto.
     2 px por minuto ⇒ cada hora mide 120 px, los casilleros de 5' miden 10 px. */
 export const PX_PER_MIN = 2;
-const TRACK_HEIGHT_PX = (WINDOW_END_MIN - WINDOW_START_MIN) * PX_PER_MIN;
+const TRACK_TOTAL_MIN = WINDOW_END_MIN - WINDOW_START_MIN;
+const TRACK_HEIGHT_PX = TRACK_TOTAL_MIN * PX_PER_MIN;
 /** Snap del drop: cada 5 minutos (los "casilleros"). */
 const DROP_SNAP_MIN = 5;
 function minuteToPx(minute: number): number {
@@ -577,21 +578,37 @@ export default function DayView({ token, date, day, canManage, clusterId = null,
             <span className="ap-badge ap-badge-live"><span className="ap-badge-dot" />{running.length} ejecutando</span>
           </div>
           <div className="ap-timeline-scroll" ref={timelineRef} role="region" aria-label="Timeline del día, scrolleable">
-            <div
-              ref={trackRef}
-              className={`ap-timeline ap-track ${dragSource ? "is-dragging" : ""}`}
-              style={{ height: TRACK_HEIGHT_PX }}
-              onDragOver={handleTrackDragOver}
-              onDragLeave={handleTrackDragLeave}
-              onDrop={handleTrackDrop}
-            >
-              {/* Regla: gridlines absolutas por hora con rótulo-chip adentro
-                  del track — la esquina superior de cada tarjeta SIEMPRE cae
-                  exactamente en su hora/minuto, sin depender del gutter. */}
+            <div className="ap-day-track-wrap">
+              {/* REGLA: columna propia a la IZQUIERDA del track — los rótulos
+                  de hora viven acá y ninguna tarjeta puede taparlos. Ticks
+                  menores cada 15'; los casilleros de 5' son las franjas del track. */}
+              <div className="ap-day-axis" style={{ height: TRACK_HEIGHT_PX }} aria-hidden="true">
+                {HOURS.map((hour) => (
+                  <span
+                    key={hour}
+                    className={`ap-day-axis-hour ${hour === HOURS[0] ? "is-first" : ""}`}
+                    style={{ top: minuteToPx(hour * 60) }}
+                  >
+                    {String(hour).padStart(2, "0")}:00
+                  </span>
+                ))}
+                {Array.from({ length: Math.floor(TRACK_TOTAL_MIN / 15) }, (_, i) => 15 * (i + 1))
+                  .filter((m) => m % 60 !== 0 && m < TRACK_TOTAL_MIN)
+                  .map((m) => (
+                    <i key={m} className="ap-day-axis-minor" style={{ top: minuteToPx(WINDOW_START_MIN + m) }} />
+                  ))}
+              </div>
+              <div
+                ref={trackRef}
+                className={`ap-track ${dragSource ? "is-dragging" : ""}`}
+                style={{ height: TRACK_HEIGHT_PX }}
+                onDragOver={handleTrackDragOver}
+                onDragLeave={handleTrackDragLeave}
+                onDrop={handleTrackDrop}
+              >
+              {/* Gridlines horarias dentro del track (sin rótulos: viven en la axis). */}
               {HOURS.map((hour) => (
-                <div className="ap-hour-gridline" key={hour} style={{ top: minuteToPx(hour * 60) }}>
-                  <span className={hour === HOURS[0] ? "is-first" : ""}>{String(hour).padStart(2, "0")}:00</span>
-                </div>
+                <div className="ap-hour-gridline" key={hour} style={{ top: minuteToPx(hour * 60) }} />
               ))}
 
               {/* Casilleros de 5 minutos SIEMPRE visibles (suaves); al arrastrar
@@ -639,6 +656,7 @@ export default function DayView({ token, date, day, canManage, clusterId = null,
                 aria-label={`Ahora: ${baTimeOfMinutes(baMinutesOf(nowIso))} Buenos Aires`}
               >
                 <span>AHORA · {baTimeOfMinutes(baMinutesOf(nowIso))}</span>
+              </div>
               </div>
             </div>
           </div>

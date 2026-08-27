@@ -669,7 +669,7 @@
    con chip arriba. Vive dentro de .ap-timeline (position: relative)
    y se posiciona por JS con top en porcentaje de la ventana 12:00–22:00. */
 .ap-planner .ap-now-marker {
-  position: absolute; left: 53px; right: 6px; z-index: 6;
+  position: absolute; left: 0; right: 4px; z-index: 6;
   pointer-events: none;
 }
 .ap-planner .ap-now-marker::before {
@@ -677,7 +677,7 @@
   border-top: 1.5px dashed rgba(134, 239, 172, 0.75);
 }
 .ap-planner .ap-now-marker span {
-  position: absolute; left: -4px; top: -22px;
+  position: absolute; right: calc(100% + 10px); top: -11px;
   display: inline-flex; align-items: center; gap: 6px;
   padding: 3px 8px;
   color: #bbf7d0; font-size: 9px; font-weight: 800; letter-spacing: 0.08em;
@@ -820,27 +820,45 @@
    Escala 2 px por minuto; la regla izquierda dibuja gridlines por hora y el
    drop cae en casilleros de 5' (10 px) con badge amarillo sobre la regla. */
 .ap-planner .ap-track { position: relative; }
-/* Regla: líneas horarias completas + rótulo-chip INTERNO (a la izquierda
-   sobre la propia línea) — nunca depende del recorte del gutter. */
-.ap-planner .ap-hour-gridline {
-  position: absolute; left: 4px; right: 2px;
-  border-top: 1px solid rgba(255, 255, 255, .16);
-  pointer-events: none;
+/* ═══ Regla + track como DOS planos separados ═══
+   La columna de la izquierda (axis) vive FUERA del track: los rótulos de hora
+   jamás pueden ser tapados por una tarjeta. El track arranca después de ella. */
+.ap-planner .ap-day-track-wrap { position: relative; }
+.ap-planner .ap-day-axis {
+  position: absolute; left: 0; top: 0; width: 62px;
+  pointer-events: none; z-index: 3;
 }
-.ap-planner .ap-hour-gridline > span {
-  position: absolute; left: 10px; top: -12px;
+.ap-planner .ap-day-axis-hour {
+  position: absolute; right: 8px; transform: translateY(-50%);
+  display: inline-flex; align-items: center;
   padding: 3px 9px; border-radius: 999px;
   color: #fafafa; font-size: 11px; font-weight: 800;
   font-variant-numeric: tabular-nums; letter-spacing: .04em;
-  background: rgba(9, 9, 11, .92);
-  border: 1px solid rgba(255, 255, 255, .14);
+  background: rgba(9, 9, 11, .94);
+  border: 1px solid rgba(255, 255, 255, .16);
   box-shadow: 0 2px 10px rgba(0, 0, 0, .55);
 }
-.ap-planner .ap-hour-gridline > span.is-first { top: 5px; }
-
+/* La primera marca se apoya CON su borde superior en la línea de las 12:00
+   (consistente con el anclaje superior de las tarjetas). */
+.ap-planner .ap-day-axis-hour.is-first { transform: none; }
+/* Ticks menores cada 15' (los de 5' son las franjas del track). */
+.ap-planner .ap-day-axis-minor {
+  position: absolute; right: 0; width: 9px; height: 0;
+  border-top: 1px solid rgba(255, 255, 255, .12);
+}
+.ap-planner .ap-track {
+  position: relative;
+  margin-left: 64px;
+  border-left: 1px solid rgba(255, 255, 255, .18);
+}
+.ap-planner .ap-hour-gridline {
+  position: absolute; left: 0; right: 0;
+  border-top: 1px solid rgba(255, 255, 255, .10);
+  pointer-events: none;
+}
 .ap-planner .ap-slot-overlay {
   position: absolute; inset: 0;
-  border-radius: 12px;
+  border-radius: 10px;
   background:
     linear-gradient(to bottom,
       rgba(255, 255, 255, .05) 0 1px, rgba(255, 255, 255, 0) 1px 60px),
@@ -867,8 +885,10 @@
   pointer-events: none; z-index: 5;
 }
 @media (max-width: 700px) {
-  .ap-planner .ap-hour-gridline { left: -42px; }
-  .ap-planner .ap-drop-guide { left: -42px; }
-  .ap-planner .ap-drag-badge { left: -50px; width: 44px; }
+  .ap-planner .ap-day-axis { width: 48px; }
+  .ap-planner .ap-track { margin-left: 50px; }
+  .ap-planner .ap-day-axis-hour { right: 4px; font-size: 10px; padding: 2px 7px; }
+  .ap-planner .ap-drop-guide { left: -50px; }
+  .ap-planner .ap-drag-badge { left: -52px; width: 46px; }
   .ap-planner .ap-drag-badge > span { font-size: 10px; padding: 2px 7px; }
 }
