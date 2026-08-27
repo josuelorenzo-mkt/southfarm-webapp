@@ -590,6 +590,8 @@ export default function DayView({ token, date, day, canManage, clusterId = null,
                     style={{ top: minuteToPx(hour * 60) }}
                   >
                     {String(hour).padStart(2, "0")}:00
+                    {/* Línea conectora: une la burbuja con la gridline del track. */}
+                    <i className="ap-day-axis-hourline" style={{ top: hour === HOURS[0] ? "0%" : "50%" }} />
                   </span>
                 ))}
                 {Array.from({ length: Math.floor(TRACK_TOTAL_MIN / 15) }, (_, i) => 15 * (i + 1))
@@ -840,11 +842,26 @@ export default function DayView({ token, date, day, canManage, clusterId = null,
               <button className="ap-icon-btn" title="Cerrar" onClick={() => setCascadePlan(null)}>×</button>
             </div>
             <div className="ap-modal-body">
-              <p className="ap-hint" style={{ fontSize: 12, lineHeight: 1.6 }}>
-                Metés <strong>#{cascadePlan.task.id}</strong> ({taskName(cascadePlan.task)}) a las{" "}
-                <strong>{formatBATime(cascadePlan.requestedFor)}</strong>. Las siguientes tareas pasan al
-                horario continuo más próximo, sin pisarse entre ellas:
-              </p>
+              {(() => {
+                const primaryMove = cascadePlan.moves.find((m) => m.task_id === cascadePlan.task.id);
+                const effectiveTo = primaryMove?.to || cascadePlan.requestedFor;
+                const ajustada = effectiveTo !== cascadePlan.requestedFor;
+                return (
+                  <>
+                    <p className="ap-hint" style={{ fontSize: 12, lineHeight: 1.6 }}>
+                      Metés <strong>#{cascadePlan.task.id}</strong> ({taskName(cascadePlan.task)}) a las{" "}
+                      <strong>{formatBATime(effectiveTo)}</strong>
+                      {ajustada ? (
+                        <> <span style={{ color: "#fbbf24" }}>
+                          (el casillero {formatBATime(cascadePlan.requestedFor)} rozaba el margen de la tarea
+                          anterior: entra en el primer minuto libre)
+                        </span></>
+                      ) : null}. Las siguientes tareas pasan al horario continuo más próximo, sin pisarse
+                      entre ellas:
+                    </p>
+                  </>
+                );
+              })()}
               <ul style={{ margin: "10px 0 0", padding: 0, listStyle: "none", display: "flex", flexDirection: "column", gap: 6 }}>
                 {cascadePlan.moves.map((move) => {
                   const original = day.tasks.find((candidate) => candidate.id === move.task_id);

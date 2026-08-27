@@ -829,6 +829,9 @@
   pointer-events: none; z-index: 3;
 }
 .ap-planner .ap-day-axis-hour {
+  position: absolute; right: 8px;
+  transform: translateY(-50%);
+  display: inline-flex; align-items: center;
   position: absolute; right: 8px; transform: translateY(-50%);
   display: inline-flex; align-items: center;
   padding: 3px 9px; border-radius: 999px;
@@ -891,4 +894,11 @@
   .ap-planner .ap-drop-guide { left: -50px; }
   .ap-planner .ap-drag-badge { left: -52px; width: 46px; }
   .ap-planner .ap-drag-badge > span { font-size: 10px; padding: 2px 7px; }
+}
+
+/* Conector: la línea de la hora sale del borde derecho de la burbuja y llega
+   hasta el borde de la axis (donde la retoma la gridline del track). */
+.ap-planner .ap-day-axis-hourline {
+  position: absolute; left: calc(100% + 2px); width: 7px; height: 0;
+  border-top: 1px solid rgba(255, 255, 255, .18);
 }
