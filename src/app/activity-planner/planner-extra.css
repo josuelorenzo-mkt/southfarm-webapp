@@ -46,6 +46,13 @@
 .ap-planner .ap-hero-stats { display: flex; gap: 34px; position: relative; z-index: 1; flex-wrap: wrap; }
 .ap-planner .ap-hero-stat strong { display: block; color: var(--text-primary); font-size: 25px; line-height: 1; letter-spacing: -0.06em; }
 .ap-planner .ap-hero-stat span { display: block; margin-top: 7px; color: var(--text-muted); font-size: 9px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; }
+/* FIX UI: mini-etiqueta "próximamente" del stat Views (cluster-detail.tsx):
+   la clase se usaba sin definición y todo el estilo vivía duplicado inline. */
+.ap-planner .ap-hero-stat-soon {
+  display: block; margin-top: 4px;
+  color: #fbbf24; font-size: 8px; font-weight: 800;
+  letter-spacing: 0.08em; text-transform: uppercase;
+}
 
 /* ============ Layout de dos columnas ============ */
 
@@ -601,9 +608,13 @@
   margin: 4px 0 2px; padding: 11px 12px;
   border: 1px solid rgba(192, 38, 211, 0.3); border-radius: 12px;
   background: rgba(192, 38, 211, 0.055);
-  animation: apFloatIn 0.3s ease both;
+  animation: apUpIn 0.3s ease both;
 }
-@keyframes apFloatIn {
+/* FIX UI: keyframes renombrados (apUpIn). Antes se llamaban apFloatIn, igual
+   que los de planner.css (cargado desde layout.tsx, ANTES que este archivo):
+   la redeclaración pisaba el float-in global de 12px usado por
+   .ap-cluster-row — mismo nombre = última definición gana en toda la app. */
+@keyframes apUpIn {
   from { opacity: 0; transform: translateY(4px); }
   to { opacity: 1; transform: none; }
 }
