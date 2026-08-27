@@ -815,3 +815,61 @@
   margin-right: auto;
   color: var(--text-muted); font-size: 10px;
 }
+
+/* ═══ Fase 2.5-visual: TRACK ABSOLUTO del timeline de día ═══
+   Escala 2 px por minuto; la regla izquierda dibuja gridlines por hora y el
+   drop cae en casilleros de 5' (10 px) con badge amarillo sobre la regla. */
+.ap-planner .ap-track { position: relative; }
+.ap-planner .ap-hour-gridline {
+  position: absolute; left: -56px; right: 2px;
+  border-top: 1px solid var(--border-subtle);
+  pointer-events: none;
+}
+.ap-planner .ap-hour-gridline > span {
+  position: absolute; left: 6px; top: -8px;
+  width: 42px; text-align: right;
+  color: var(--text-dim); font-size: 10px; font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+/* Casilleros de 5 minutos: bandas suaves alternadas, apenas "vidrio". */
+.ap-planner .ap-slot-overlay {
+  position: absolute; inset: 0;
+  border-radius: 12px;
+  background:
+    linear-gradient(to bottom,
+      rgba(134, 239, 172, .045) 0 9px, rgba(134, 239, 172, 0) 9px 10px),
+    repeating-linear-gradient(to bottom,
+      rgba(255, 255, 255, .03) 0 20px, rgba(255, 255, 255, 0) 20px 40px);
+  box-shadow: inset 0 0 60px rgba(134, 239, 172, .05);
+  backdrop-filter: blur(1.2px);
+  pointer-events: none;
+  animation: apSlotsIn .18s ease-out;
+}
+@keyframes apSlotsIn { from { opacity: 0 } to { opacity: 1 } }
+/* Guía horizontal dorada en el casillero destino. */
+.ap-planner .ap-drop-guide {
+  position: absolute; left: -56px; right: 2px; height: 0;
+  border-top: 2px dashed rgba(250, 204, 21, .9);
+  box-shadow: 0 0 10px rgba(250, 204, 21, .35);
+  pointer-events: none; z-index: 6;
+}
+/* Badge amarillo sobre la REGLA con la hora exacta del drop. */
+.ap-planner .ap-drag-badge {
+  position: absolute; left: -66px; width: 54px;
+  margin-top: -13px; display: flex; justify-content: center;
+  pointer-events: none; z-index: 7;
+}
+.ap-planner .ap-drag-badge > span {
+  display: inline-flex; align-items: center;
+  padding: 3px 9px; border-radius: 999px;
+  background: #facc15; color: #18181b;
+  font-size: 11px; font-weight: 900; font-variant-numeric: tabular-nums;
+  letter-spacing: .02em;
+  box-shadow: 0 4px 14px rgba(250, 204, 21, .45), 0 0 0 3px rgba(250, 204, 21, .18);
+}
+@media (max-width: 700px) {
+  .ap-planner .ap-hour-gridline { left: -42px; }
+  .ap-planner .ap-drop-guide { left: -42px; }
+  .ap-planner .ap-drag-badge { left: -50px; width: 44px; }
+  .ap-planner .ap-drag-badge > span { font-size: 10px; padding: 2px 7px; }
+}

@@ -9,8 +9,8 @@
  * drag & drop por tarea INDIVIDUAL con modal de confirmación.
  */
 import "./planner-extra.css";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import type { ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { CSSProperties, DragEvent as ReactDragEvent, ReactNode } from "react";
 import { plannerApi, PlannerApiError, type CascadeMoveDto } from "./api";
 import {
   BUENOS_AIRES_TIMEZONE,
@@ -28,6 +28,20 @@ const HOURS = [12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22];
 /** Ventana 12:00–22:00 BA en minutos desde las 0:00. */
 const WINDOW_START_MIN = 12 * 60;
 const WINDOW_END_MIN = 22 * 60;
+/** Fase 2.5-visual: el timeline se posiciona ABSOLUTAMENTE por minuto.
+    2 px por minuto ⇒ cada hora mide 120 px, los casilleros de 5' miden 10 px. */
+export const PX_PER_MIN = 2;
+const TRACK_HEIGHT_PX = (WINDOW_END_MIN - WINDOW_START_MIN) * PX_PER_MIN;
+/** Snap del drop: cada 5 minutos (los "casilleros"). */
+const DROP_SNAP_MIN = 5;
+function minuteToPx(minute: number): number {
+  return (minute - WINDOW_START_MIN) * PX_PER_MIN;
+}
+function formatMinuteOf(dayMinute: number): string {
+  const hour = Math.floor(dayMinute / 60);
+  const minute = dayMinute % 60;
+  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+}
 const NOW_REFRESH_MS = 30000;
 
 const TASK_ICONS: Record<"warmup" | "scan" | "publish", ReactNode> = {
@@ -100,31 +114,50 @@ function baTimeOfMinutes(minutes: number): string {
 }
 
 /**
- * Posición EN PÍXELES del marcador AHORA sobre la columna interna del timeline.
- * Se mide con los offsets reales de las filas de cada hora (data-hour), así que
- * da la hora exacta aunque una fila se haya estirado por tener muchas tareas.
- * Devuelve null si la hora actual está fuera de la ventana 12:00–22:00 BA.
+ * Posición px del marcador AHORA sobre el track absoluto: matemática directa
+ * (minutos transcurridos × escala). Fuera de 12–22 BA devuelve null (oculto).
  */
-function calcNowMarkerPx(inner: HTMLElement | null, nowIso: string): number | null {
-  if (!inner) return null;
+function nowMarkerTopPx(nowIso: string): number | null {
   const minutes = baMinutesOf(nowIso);
-  if (minutes < WINDOW_START_MIN || minutes >= WINDOW_END_MIN + 60) return null;
-  const nowHour = Math.floor(minutes / 60);
-  const fraction = (minutes - nowHour * 60) / 60;
-  let topPx: number | null = null;
-  for (const row of Array.from(inner.children) as HTMLElement[]) {
-    const rowHour = Number((row as HTMLElement).dataset.hour);
-    if (!Number.isInteger(rowHour)) continue;
-    if (rowHour < nowHour) {
-      topPx = (topPx ?? 0) + row.offsetHeight;
-    } else if (rowHour === nowHour) {
-      const basePx: number = topPx ?? 0;
-      topPx = basePx + row.offsetHeight * fraction;
-    } else if (topPx !== null) {
-      break;
+  if (minutes < WINDOW_START_MIN || minutes >= WINDOW_END_MIN) return null;
+  return minuteToPx(minutes);
+}
+
+interface LaidOutTask {
+  task: DayTask;
+  startMin: number;
+  durMin: number;
+  lane: number;
+  lanes: number;
+}
+
+/**
+ * Layout por carriles para tareas ABSOLUTAS: la esquina SUPERIOR de cada
+ * tarjeta se apoya en su minuto de inicio sobre la regla; las que se enciman
+ * en el tiempo (teléfonos distintos) comparten el ancho en columnas.
+ */
+function layOutTasks(tasks: DayTask[]): LaidOutTask[] {
+  const items = tasks
+    .map((task) => ({
+      task,
+      startMin: baMinutesOf(task.scheduledFor || ""),
+      durMin: Math.max(15, Number(task.durationMin) || 45),
+    }))
+    .filter((item) => item.startMin >= WINDOW_START_MIN && item.startMin < WINDOW_END_MIN)
+    .sort((a, b) => a.startMin - b.startMin || b.durMin - a.durMin);
+  const laneEnds: number[] = [];
+  const assignments: number[] = [];
+  for (const item of items) {
+    let lane = laneEnds.findIndex((end) => end <= item.startMin);
+    if (lane === -1) {
+      lane = laneEnds.length;
+      laneEnds.push(0);
     }
+    laneEnds[lane] = item.startMin + item.durMin;
+    assignments.push(lane);
   }
-  return topPx;
+  const totalLanes = Math.max(1, laneEnds.length);
+  return items.map((item, index) => ({ ...item, lane: assignments[index], lanes: totalLanes }));
 }
 
 interface TaskBlockProps {
@@ -134,6 +167,8 @@ interface TaskBlockProps {
   onCancel: (task: DayTask) => void;
   onDragStart: (task: DayTask) => void;
   onDragEnd: () => void;
+  /** Posicionamiento absoluto sobre el track (top = minuto de inicio). */
+  layoutStyle?: React.CSSProperties;
 }
 
 /** Color estable por teléfono: al mirar la franja horaria se distingue de un
@@ -145,7 +180,7 @@ function deviceColor(alias: string | null | undefined): string {
   return `hsl(${hash} 70% 60%)`;
 }
 
-function TaskBlock({ task, canManage, actionBusy, onCancel, onDragStart, onDragEnd }: TaskBlockProps) {
+function TaskBlock({ task, canManage, actionBusy, onCancel, onDragStart, onDragEnd, layoutStyle }: TaskBlockProps) {
   const kind = taskKind(task.taskType);
   const stateClass = task.status === "running"
     ? "is-running"
@@ -162,7 +197,7 @@ function TaskBlock({ task, canManage, actionBusy, onCancel, onDragStart, onDragE
   return (
     <div
       className={`ap-task t-${kind} ${stateClass}`}
-      style={{ borderLeft: `3px solid ${deviceColor(task.deviceAlias || null)}` }}
+      style={{ ...layoutStyle, borderLeft: `3px solid ${deviceColor(task.deviceAlias || null)}` }}
       data-type={kind}
       data-status={task.status}
       title={task.deviceAlias ? `Teléfono ${task.deviceAlias}` : undefined}
@@ -237,11 +272,11 @@ export default function DayView({ token, date, day, canManage, clusterId = null,
   });
   const [actionBusy, setActionBusy] = useState("");
   const [error, setError] = useState("");
-  /** D1: tarea arrastrada y hora bajo el cursor (indicador de drop). */
+  /** D1/Fase 2.5-visual: tarea arrastrada y casillero (cada 5') bajo el cursor. */
   const [dragSource, setDragSource] = useState<DayTask | null>(null);
-  const [dragOverHour, setDragOverHour] = useState<number | null>(null);
-  const [confirmTarget, setConfirmTarget] = useState<{ task: DayTask; hour: number } | null>(null);
-  /** Fase 2: hora elegida en el modal de movimiento ("HH:MM", default la hora del drop). */
+  const [dragSnapMin, setDragSnapMin] = useState<number | null>(null);
+  const [confirmTarget, setConfirmTarget] = useState<{ task: DayTask; minute: number } | null>(null);
+  /** Fase 2: hora elegida en el modal de movimiento ("HH:MM", default la del drop). */
   const [moveTime, setMoveTime] = useState("12:00");
   /** Fase 2: choque de agenda al mover — la API devuelve 409 + próximo hueco libre. */
   const [slotConflict, setSlotConflict] = useState<{ task: DayTask; nextFreeSlot: string; requestedFor: string } | null>(null);
@@ -250,10 +285,8 @@ export default function DayView({ token, date, day, canManage, clusterId = null,
   /** AHORA: timestamp actualizado cada 30 s (para el indicador del timeline). */
   const [nowIso, setNowIso] = useState<string>(() => new Date().toISOString());
   const timelineRef = useRef<HTMLDivElement | null>(null);
-  const timelineInnerRef = useRef<HTMLDivElement | null>(null);
+  const trackRef = useRef<HTMLDivElement | null>(null);
   const scrolledToNowRef = useRef(false);
-  /** Fase 2.5-fix: posición px-real del marcador AHORA (medida sobre las filas). */
-  const [nowMarkerPx, setNowMarkerPx] = useState<number | null>(null);
 
   useEffect(() => {
     const interval = window.setInterval(() => setNowIso(new Date().toISOString()), NOW_REFRESH_MS);
@@ -278,26 +311,16 @@ export default function DayView({ token, date, day, canManage, clusterId = null,
       return aTime - bTime;
     }), [day.tasks, filters]);
 
-  const byHour = useMemo(() => {
-    const map = new Map<number, DayTask[]>();
-    HOURS.forEach((hour) => map.set(hour, []));
-    visibleTasks.forEach((task) => {
-      const hour = task.scheduledFor ? baHourOf(task.scheduledFor) : 12;
-      const list = map.get(hour) || [];
-      list.push(task);
-      map.set(hour, list);
-    });
-    return map;
-  }, [visibleTasks]);
+  /** Layout absoluto con carriles para encimadas entre teléfonos distintos. */
+  const laidOutTasks = useMemo(() => layOutTasks(visibleTasks), [visibleTasks]);
 
   const running = day.tasks.filter((task) => task.status === "running");
+  const completed = day.tasks.filter((task) => task.status === "completed");
+  const queued = day.tasks.filter((task) => ["pending", "paused"].includes(task.status));
+  const late = day.tasks.filter((task) => task.status === "overdue" || task.status === "expired");
 
-  /* Marcador AHORA en píxeles reales: se recalcula cuando cambian las filas
-     (carga del día, tarjetas movidas) o cada tick de 30 s. Las horas cargadas
-     estiran su fila y la medición de offsets lo absorbe sin perder exactitud. */
-  useLayoutEffect(() => {
-    setNowMarkerPx(calcNowMarkerPx(timelineInnerRef.current, nowIso));
-  }, [byHour, nowIso, visibleTasks.length]);
+  /* Marcador AHORA: derivado en render — matemática directa minutos × escala px. */
+  const nowMarkerPos = nowMarkerTopPx(nowIso);
 
   /* Auto-scroll suave a la posición actual al montar (una sola vez). */
   useEffect(() => {
@@ -305,16 +328,13 @@ export default function DayView({ token, date, day, canManage, clusterId = null,
     const task = window.setTimeout(() => {
       const timeline = timelineRef.current;
       if (!timeline) return;
-      const px = calcNowMarkerPx(timelineInnerRef.current, nowIso);
+      const px = nowMarkerTopPx(nowIso);
       if (px === null) return; // fuera de la ventana 12:00–22:00: no se fuerza scroll
-      timeline.scrollTo({ top: Math.max(0, px - timeline.clientHeight / 2), behavior: "smooth" });
+      timeline.scrollTo({ top: Math.max(0, px - timeline.clientHeight / 3), behavior: "smooth" });
       scrolledToNowRef.current = true;
     }, 0);
     return () => window.clearTimeout(task);
   }, [nowIso]);
-  const completed = day.tasks.filter((task) => task.status === "completed");
-  const queued = day.tasks.filter((task) => ["pending", "paused"].includes(task.status));
-  const late = day.tasks.filter((task) => task.status === "overdue" || task.status === "expired");
 
   const loadMax = useMemo(() => {
     const counts = HOURS.map((hour) => (day.hourly.find((item) => item.hour === hour)?.count ?? 0));
@@ -342,22 +362,53 @@ export default function DayView({ token, date, day, canManage, clusterId = null,
     });
   };
 
-  /* D1: drag & drop → confirmación con modal ap-modal (no window.confirm ni prompt). */
+  /* D1/Fase 2.5-visual: drag & drop sobre el TRACK absoluto — el cursor cae en
+     un casillero de 5' (snap), la regla muestra la hora destino en amarillo y
+     el drop abre el modal de confirmación con ese horario pre-cargado. */
   const handleTaskDragStart = (task: DayTask) => {
     setDragSource(task);
-    setDragOverHour(null);
+    setDragSnapMin(null);
   };
 
-  const handleDrop = (hour: number) => {
+  /** Minuto (múltiplo de 5') correspondiente a una coordenada Y del track. */
+  const snapMinuteAt = (clientY: number): number | null => {
+    const track = trackRef.current;
+    if (!track) return null;
+    const rect = track.getBoundingClientRect();
+    const rawMinute = WINDOW_START_MIN + ((clientY - rect.top) / PX_PER_MIN);
+    const snapped = Math.round(rawMinute / DROP_SNAP_MIN) * DROP_SNAP_MIN;
+    return Math.min(WINDOW_END_MIN, Math.max(WINDOW_START_MIN, snapped));
+  };
+
+  const handleTrackDragOver = (event: ReactDragEvent<HTMLDivElement>) => {
     if (!dragSource) return;
-    setDragOverHour(null);
-    setMoveTime(`${String(hour).padStart(2, "0")}:00`);
-    setConfirmTarget({ task: dragSource, hour });
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+    const minute = snapMinuteAt(event.clientY);
+    if (minute !== null && minute !== dragSnapMin) setDragSnapMin(minute);
+  };
+
+  const handleTrackDragLeave = (event: ReactDragEvent<HTMLDivElement>) => {
+    // Solo limpiar cuando el cursor sale del track entero (no al cruzar hijos).
+    if (event.currentTarget.contains(event.relatedTarget as Node)) return;
+    setDragSnapMin(null);
+  };
+
+  const handleTrackDrop = (event: ReactDragEvent<HTMLDivElement>) => {
+    if (!dragSource) return;
+    event.preventDefault();
+    const task = dragSource;
+    const minute = dragSnapMin ?? snapMinuteAt(event.clientY);
+    setDragSource(null);
+    setDragSnapMin(null);
+    if (!task || minute === null) return;
+    setMoveTime(formatMinuteOf(minute));
+    setConfirmTarget({ task, minute });
   };
 
   const clearDrag = () => {
     setDragSource(null);
-    setDragOverHour(null);
+    setDragSnapMin(null);
   };
 
   /* Fase 2: el movimiento valida contra la agenda del teléfono en el backend
@@ -522,60 +573,63 @@ export default function DayView({ token, date, day, canManage, clusterId = null,
             <span className="ap-badge ap-badge-live"><span className="ap-badge-dot" />{running.length} ejecutando</span>
           </div>
           <div className="ap-timeline-scroll" ref={timelineRef} role="region" aria-label="Timeline del día, scrolleable">
-            <div className="ap-timeline" ref={timelineInnerRef}>
-              {HOURS.map((hour) => {
-                const hourTasks = byHour.get(hour) || [];
-                const now = isNowInHour(hour, nowIso);
-                const isDropTarget = dragSource != null && dragOverHour === hour;
-                return (
-                  <div className={`ap-hour ${now ? "is-now" : ""}`} key={hour} data-hour={hour}>
-                    <span className="ap-hour-label">{String(hour).padStart(2, "0")}:00</span>
-                    <div
-                      className={`ap-hour-tasks ${isDropTarget ? "is-drop-target" : ""}`}
-                      style={isDropTarget ? { background: "rgba(34,197,94,.05)", borderRadius: 10, minHeight: 40 } : undefined}
-                      onDragOver={(event) => {
-                        if (!dragSource) return;
-                        event.preventDefault();
-                        event.dataTransfer.dropEffect = "move";
-                        if (dragOverHour !== hour) setDragOverHour(hour);
-                      }}
-                      onDragLeave={(event) => {
-                        if (event.currentTarget.contains(event.relatedTarget as Node)) return;
-                        setDragOverHour((current) => (current === hour ? null : current));
-                      }}
-                      onDrop={(event) => {
-                        if (!dragSource) return;
-                        event.preventDefault();
-                        handleDrop(hour);
-                      }}
-                    >
-                      {hourTasks.length ? hourTasks.map((task) => (
-                        <TaskBlock
-                          key={task.id}
-                          task={task}
-                          canManage={canManage}
-                          actionBusy={actionBusy}
-                          onCancel={cancelTask}
-                          onDragStart={handleTaskDragStart}
-                          onDragEnd={clearDrag}
-                        />
-                      )) : <span style={{ color: "var(--text-dim)", fontSize: 10, padding: "6px 0" }}>— sin tareas —</span>}
-                      {isDropTarget && (
-                        <span style={{ color: "#22c55e", fontSize: 10, fontWeight: 600 }}>
-                          Soltar acá mueve “{dragSource ? taskName(dragSource) : ""}” a las {String(hour).padStart(2, "0")}:00 · podés ajustar minutos después
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-              {/* Indicador AHORA: posición px-real medida sobre las filas
-                  (data-hour), exacta incluso si una hora cargada se estira.
-                  Fuera de la ventana 12–22 ahoraMarkerPx es null y se oculta. */}
-              {nowMarkerPx !== null && (
+            <div
+              ref={trackRef}
+              className={`ap-timeline ap-track ${dragSource ? "is-dragging" : ""}`}
+              style={{ height: TRACK_HEIGHT_PX }}
+              onDragOver={handleTrackDragOver}
+              onDragLeave={handleTrackDragLeave}
+              onDrop={handleTrackDrop}
+            >
+              {/* Regla: gridlines absolutas por hora — la esquina superior de
+                  cada tarjeta SIEMPRE cae exactamente en su hora/minuto. */}
+              {HOURS.map((hour) => (
+                <div className="ap-hour-gridline" key={hour} style={{ top: minuteToPx(hour * 60) }}>
+                  <span>{String(hour).padStart(2, "0")}:00</span>
+                </div>
+              ))}
+
+              {/* Casilleros de 5 minutos estilo liquid glass (solo al arrastrar). */}
+              {dragSource && (
+                <>
+                  <div className="ap-slot-overlay" aria-hidden="true" />
+                  {dragSnapMin !== null && (
+                    <>
+                      <div className="ap-drop-guide" style={{ top: minuteToPx(dragSnapMin) }} />
+                      <div className="ap-drag-badge" style={{ top: minuteToPx(dragSnapMin) }} role="status">
+                        <span>{formatMinuteOf(dragSnapMin)}</span>
+                      </div>
+                    </>
+                  )}
+                </>
+              )}
+
+              {/* Tareas: top = minuto de inicio (esquina superior apoyada en la regla). */}
+              {laidOutTasks.map(({ task, startMin, durMin, lane, lanes }) => (
+                <TaskBlock
+                  key={task.id}
+                  task={task}
+                  canManage={canManage}
+                  actionBusy={actionBusy}
+                  onCancel={cancelTask}
+                  onDragStart={handleTaskDragStart}
+                  onDragEnd={clearDrag}
+                  layoutStyle={{
+                    position: "absolute",
+                    top: minuteToPx(startMin),
+                    height: Math.max(44, durMin * PX_PER_MIN - 4),
+                    left: `calc(${(lane / lanes) * 100}% + 3px)`,
+                    width: `calc(${100 / lanes}% - 8px)`,
+                    zIndex: 2 + lane,
+                  }}
+                />
+              ))}
+
+              {/* Indicador AHORA sobre la escala real del track. */}
+              {nowMarkerPos !== null && (
                 <div
                   className="ap-now-marker"
-                  style={{ top: `${Math.max(0, nowMarkerPx - 1)}px` }}
+                  style={{ top: `${Math.max(0, nowMarkerPos - 1)}px` }}
                   role="status"
                   aria-label={`Ahora: ${baTimeOfMinutes(baMinutesOf(nowIso))} Buenos Aires`}
                 >
