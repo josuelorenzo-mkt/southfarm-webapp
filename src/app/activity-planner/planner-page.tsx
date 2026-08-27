@@ -47,6 +47,8 @@ export default function PlannerPage({ token, canManage }: PlannerPageProps) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [generating, setGenerating] = useState(false);
+  /** Acciones rápidas: id→device_id de todas las cuentas del workspace. */
+  const [workspaceAccounts, setWorkspaceAccounts] = useState<{ id: number; device_id: number }[]>([]);
   const [lastSync, setLastSync] = useState<string>("");
   /** v6: modal "Crear cluster" (pick de cuentas scaneadas del workspace). */
   const [createOpen, setCreateOpen] = useState(false);
@@ -120,6 +122,19 @@ export default function PlannerPage({ token, canManage }: PlannerPageProps) {
     const interval = window.setInterval(() => reloadCurrent(true), 10000);
     return () => window.clearInterval(interval);
   }, [reloadCurrent]);
+
+  useEffect(() => {
+    let cancelled = false;
+    plannerApi.getWorkspaceAccounts(token)
+      .then((data) => {
+        if (cancelled) return;
+        setWorkspaceAccounts((data.accounts || []).map((account) => ({
+          id: Number(account.id), device_id: Number(account.device_id),
+        })));
+      })
+      .catch(() => { /* el panel de acciones rápidas funciona sin esto (muestra vacío) */ });
+    return () => { cancelled = true; };
+  }, [token]);
 
   /* El flag de scroll es one-shot: se limpia al cambiar de cluster o al salir de la vista rutinas
      (setTimeout 0 — patrón de este Next para setState desde effects). */
@@ -366,6 +381,8 @@ export default function PlannerPage({ token, canManage }: PlannerPageProps) {
                   ? (week?.clusters.find((candidate) => candidate.id === dayClusterId)?.name || `Clúster #${dayClusterId}`)
                   : null
               }
+              clusterAccounts={dayClusterId !== null ? (week?.clusters.find((candidate) => candidate.id === dayClusterId)?.accounts || []) : []}
+              workspaceAccounts={workspaceAccounts}
               canManage={canManage}
               onBackToWeek={() => setView("week")}
               onPrevDay={() => navigateDay(-1)}

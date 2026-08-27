@@ -22,7 +22,8 @@ import {
   publicationBadgeClass,
   shortDate,
 } from "./types";
-import type { DayResponse, DayTask, PlannerTaskType } from "./types";
+import QuickAddPanel from "./quick-add-panel";
+import type { ClusterAccount, DayResponse, DayTask, PlannerTaskType } from "./types";
 
 const HOURS = [12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22];
 /** Ventana 12:00–22:00 BA en minutos desde las 0:00. */
@@ -257,6 +258,9 @@ interface DayViewProps {
   /** Fase 2.5: si viene, la vista es la agenda de UN clúster (no del workspace). */
   clusterId?: number | null;
   clusterName?: string | null;
+  /** Acciones rápidas: cuentas del clúster + device_id por cuenta. */
+  clusterAccounts?: ClusterAccount[];
+  workspaceAccounts?: { id: number; device_id: number }[];
   onBackToWeek: () => void;
   onPrevDay: () => void;
   onNextDay: () => void;
@@ -265,7 +269,7 @@ interface DayViewProps {
   onChanged: () => void;
 }
 
-export default function DayView({ token, date, day, canManage, clusterId = null, clusterName = null, onBackToWeek, onPrevDay, onNextDay, onGoToToday, onChanged }: DayViewProps) {
+export default function DayView({ token, date, day, canManage, clusterId = null, clusterName = null, clusterAccounts = [], workspaceAccounts = [], onBackToWeek, onPrevDay, onNextDay, onGoToToday, onChanged }: DayViewProps) {
   const [filters, setFilters] = useState<{ warmup: boolean; scan: boolean; publish: boolean; late: boolean }>({
     warmup: true,
     scan: true,
@@ -657,7 +661,8 @@ export default function DayView({ token, date, day, canManage, clusterId = null,
                 role="status"
                 aria-label={`Ahora: ${baTimeOfMinutes(baMinutesOf(nowIso))} Buenos Aires`}
               >
-                <span>AHORA · {baTimeOfMinutes(baMinutesOf(nowIso))}</span>
+                <span className="ap-now-flag">AHORA</span>
+                <span className="ap-now-time">{baTimeOfMinutes(baMinutesOf(nowIso))}</span>
               </div>
               </div>
             </div>
@@ -665,8 +670,8 @@ export default function DayView({ token, date, day, canManage, clusterId = null,
         </section>
 
         <aside className="ap-day-side">
-          <section className="ap-card" style={{ borderColor: "rgba(34,197,94,.22)" }}>
-            <div className="ap-card-heading" style={{ marginBottom: 14 }}>
+          <section className={`ap-card ${clusterId != null ? "ap-live-compact" : ""}`} style={{ borderColor: "rgba(34,197,94,.22)" }}>
+            <div className="ap-card-heading" style={{ marginBottom: clusterId != null ? 8 : 14 }}>
               <div>
                 <p className="ap-eyebrow ap-eyebrow-accent">LIVE</p>
                 <h3>Ejecutándose ahora</h3>
@@ -685,6 +690,17 @@ export default function DayView({ token, date, day, canManage, clusterId = null,
               )) : <div className="ap-empty" style={{ padding: "18px 14px" }}><strong>Nada en ejecución</strong><span>Las tareas que corran ahora aparecen acá con pulso en vivo.</span></div>}
             </div>
           </section>
+
+          {clusterId != null && (
+            <QuickAddPanel
+              token={token}
+              clusterName={clusterName || `Clúster #${clusterId}`}
+              accounts={clusterAccounts}
+              workspaceAccounts={workspaceAccounts}
+              date={date}
+              onChanged={onChanged}
+            />
+          )}
 
           <section className="ap-card">
             <div className="ap-card-heading" style={{ marginBottom: 10 }}>

@@ -212,6 +212,26 @@ export const plannerApi = {
     });
   },
 
+  /** POST /api/tasks/run — crear tarea (el backend la desliza si el hueco está ocupado). */
+  createTask(token: string, body: {
+    task_type: string;
+    device_id: number | string;
+    scheduled_for: string;
+    duration_minutes?: number;
+    social_account_id?: number;
+    params?: Record<string, unknown>;
+  }): Promise<{
+    task_run?: { id: number; scheduled_for: string };
+    scheduled_for_effective?: string;
+    shifted?: boolean;
+    shifted_from?: string;
+  }> {
+    return plannerRequest(`/api/tasks/run`, token, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  },
+
   /** PATCH /api/tasks/runs/:id/schedule — reagendar (endpoint existente). */
   rescheduleTask(token: string, taskId: number, scheduledFor: string): Promise<Record<string, unknown>> {
     return plannerRequest<Record<string, unknown>>(`/api/tasks/runs/${taskId}/schedule`, token, {
