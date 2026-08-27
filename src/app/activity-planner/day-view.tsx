@@ -471,6 +471,11 @@ export default function DayView({ token, date, day, canManage, onBackToWeek, onP
                           onDragEnd={clearDrag}
                         />
                       )) : <span style={{ color: "var(--text-dim)", fontSize: 10, padding: "6px 0" }}>— sin tareas —</span>}
+                      {isDropTarget && (
+                        <span style={{ color: "#22c55e", fontSize: 10, fontWeight: 600 }}>
+                          Soltar acá mueve “{dragSource ? taskName(dragSource) : ""}” a las {String(hour).padStart(2, "0")}:00 · podés ajustar minutos después
+                        </span>
+                      )}
                     </div>
                   </div>
                 );
