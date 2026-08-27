@@ -24,6 +24,28 @@ import type {
 
 export const PLANNER_API = (process.env.NEXT_PUBLIC_API_URL || "https://api.southfarm.tech").replace(/\/$/, "");
 
+/** Movimiento individual dentro de un plan de cascada (Fase 2.5). */
+export interface CascadeMoveDto {
+  task_id: number;
+  task_type?: string;
+  from: string | null;
+  to: string;
+}
+
+/** Respuesta del preview: plan completo o motivo por el que no hay arreglo. */
+export interface CascadePreviewResponse {
+  ok: boolean;
+  moves?: CascadeMoveDto[];
+  reason?: string;
+  detail?: string;
+  requested_scheduled_for?: string;
+}
+
+export interface CascadeApplyResponse {
+  ok: boolean;
+  applied?: CascadeMoveDto[];
+}
+
 function plannerRequest<T>(path: string, token: string, init: RequestInit = {}): Promise<T> {
   return authRequest<T>(PLANNER_API, path, token, init);
 }
@@ -191,6 +213,22 @@ export const plannerApi = {
   rescheduleTask(token: string, taskId: number, scheduledFor: string): Promise<Record<string, unknown>> {
     return plannerRequest<Record<string, unknown>>(`/api/tasks/runs/${taskId}/schedule`, token, {
       method: "PATCH",
+      body: JSON.stringify({ scheduled_for: scheduledFor }),
+    });
+  },
+
+  /** POST /api/tasks/runs/:id/move/preview — plan de cascada SIN aplicar nada. */
+  previewCascadeMove(token: string, taskId: number, scheduledFor: string): Promise<CascadePreviewResponse> {
+    return plannerRequest<CascadePreviewResponse>(`/api/tasks/runs/${taskId}/move/preview`, token, {
+      method: "POST",
+      body: JSON.stringify({ scheduled_for: scheduledFor }),
+    });
+  },
+
+  /** POST /api/tasks/runs/:id/move — aplica la cascada (todo o nada en backend). */
+  applyCascadeMove(token: string, taskId: number, scheduledFor: string): Promise<CascadeApplyResponse> {
+    return plannerRequest<CascadeApplyResponse>(`/api/tasks/runs/${taskId}/move`, token, {
+      method: "POST",
       body: JSON.stringify({ scheduled_for: scheduledFor }),
     });
   },

@@ -11,7 +11,7 @@
 import "./planner-extra.css";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { plannerApi, PlannerApiError } from "./api";
+import { plannerApi, PlannerApiError, type CascadeMoveDto } from "./api";
 import {
   BUENOS_AIRES_TIMEZONE,
   PLATFORM_META,
@@ -208,7 +208,9 @@ export default function DayView({ token, date, day, canManage, onBackToWeek, onP
   /** Fase 2: hora elegida en el modal de movimiento ("HH:MM", default la hora del drop). */
   const [moveTime, setMoveTime] = useState("12:00");
   /** Fase 2: choque de agenda al mover — la API devuelve 409 + próximo hueco libre. */
-  const [slotConflict, setSlotConflict] = useState<{ task: DayTask; nextFreeSlot: string } | null>(null);
+  const [slotConflict, setSlotConflict] = useState<{ task: DayTask; nextFreeSlot: string; requestedFor: string } | null>(null);
+  /** Fase 2.5: plan de cascada calculado, esperando confirmación del usuario. */
+  const [cascadePlan, setCascadePlan] = useState<{ task: DayTask; requestedFor: string; moves: CascadeMoveDto[] } | null>(null);
   /** AHORA: timestamp actualizado cada 30 s (para el indicador del timeline). */
   const [nowIso, setNowIso] = useState<string>(() => new Date().toISOString());
   const timelineRef = useRef<HTMLDivElement | null>(null);
@@ -330,7 +332,10 @@ export default function DayView({ token, date, day, canManage, onBackToWeek, onP
         if (apiError.slotConflict && apiError.nextFreeSlot) {
           setConfirmTarget(null);
           clearDrag();
-          setSlotConflict({ task, nextFreeSlot: apiError.nextFreeSlot });
+          const requestedFor = typeof apiError.data?.requested_scheduled_for === "string"
+            ? apiError.data.requested_scheduled_for
+            : scheduledFor;
+          setSlotConflict({ task, nextFreeSlot: apiError.nextFreeSlot, requestedFor });
           return;
         }
         throw cause;
@@ -351,6 +356,40 @@ export default function DayView({ token, date, day, canManage, onBackToWeek, onP
     const { task, nextFreeSlot } = slotConflict;
     setSlotConflict(null);
     performMove(task, nextFreeSlot);
+  };
+
+  /* Fase 2.5: pedirle al backend el plan de recorrido en cascada y mostrarlo
+     para confirmación. El backend recalcula y aplica todo-o-nado al confirmar. */
+  const openCascadePreview = async () => {
+    if (!slotConflict) return;
+    const { task, requestedFor } = slotConflict;
+    setActionBusy(`cascade-${task.id}`);
+    setError("");
+    try {
+      const plan = await plannerApi.previewCascadeMove(token, task.id, requestedFor);
+      if (plan.ok && plan.moves && plan.moves.length > 0) {
+        setSlotConflict(null);
+        setCascadePlan({ task, requestedFor, moves: plan.moves });
+      } else if (plan.ok && (!plan.moves || plan.moves.length === 0)) {
+        setError("El horario ya quedó libre; volvé a intentar mover la tarea.");
+        setSlotConflict(null);
+      } else {
+        setError(plan.detail || "No hay forma de acomodar la cola para ese horario.");
+      }
+    } catch (cause) {
+      setError(PlannerApiError.from(cause).message);
+    } finally {
+      setActionBusy("");
+    }
+  };
+
+  const confirmCascade = () => {
+    if (!cascadePlan) return;
+    const { task, requestedFor } = cascadePlan;
+    setCascadePlan(null);
+    void runAction(`cascada-${task.id}`, async () => {
+      await plannerApi.applyCascadeMove(token, task.id, requestedFor);
+    });
   };
 
   const cancelMove = () => {
@@ -634,11 +673,75 @@ export default function DayView({ token, date, day, canManage, onBackToWeek, onP
             <div className="ap-modal-foot">
               <button className="ap-btn ap-btn-ghost ap-btn-sm" onClick={() => setSlotConflict(null)}>Dejar como está</button>
               <button
+                className="ap-btn ap-btn-sm"
+                disabled={Boolean(actionBusy)}
+                onClick={() => void openCascadePreview()}
+                style={{ border: "1px solid rgba(255,255,255,.22)" }}
+              >
+                {actionBusy === `cascade-${slotConflict.task.id}` ? "Calculando…" : "Meterla acá y recorrer las demás"}
+              </button>
+              <button
                 className="ap-btn ap-btn-primary ap-btn-sm"
                 disabled={Boolean(actionBusy)}
                 onClick={acceptSuggestedSlot}
               >
                 {actionBusy ? "Moviendo…" : `Mover al próximo hueco · ${formatBATime(slotConflict.nextFreeSlot)}`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Fase 2.5: confirmación del recorrido en cascada con la lista exacta
+          de tareas que se van a mover y sus horarios nuevos. */}
+      {cascadePlan && (
+        <div
+          className="ap-modal-overlay"
+          role="alertdialog"
+          aria-modal="true"
+          aria-label="Confirmar recorrido en cascada"
+          onClick={(event) => { if (event.target === event.currentTarget) setCascadePlan(null); }}
+        >
+          <div className="ap-modal">
+            <div className="ap-modal-head">
+              <div>
+                <p className="ap-eyebrow ap-eyebrow-accent">RECORRIDO EN CASCADA</p>
+                <h3>Se acomodarán {cascadePlan.moves.length} tarea{cascadePlan.moves.length === 1 ? "" : "s"}</h3>
+              </div>
+              <button className="ap-icon-btn" title="Cerrar" onClick={() => setCascadePlan(null)}>×</button>
+            </div>
+            <div className="ap-modal-body">
+              <p className="ap-hint" style={{ fontSize: 12, lineHeight: 1.6 }}>
+                Metés <strong>#{cascadePlan.task.id}</strong> ({taskName(cascadePlan.task)}) a las{" "}
+                <strong>{formatBATime(cascadePlan.requestedFor)}</strong>. Las siguientes tareas pasan al
+                horario continuo más próximo, sin pisarse entre ellas:
+              </p>
+              <ul style={{ margin: "10px 0 0", padding: 0, listStyle: "none", display: "flex", flexDirection: "column", gap: 6 }}>
+                {cascadePlan.moves.map((move) => {
+                  const original = day.tasks.find((candidate) => candidate.id === move.task_id);
+                  return (
+                    <li key={move.task_id} style={{
+                      display: "flex", alignItems: "center", gap: 8,
+                      background: "rgba(255,255,255,.04)", borderRadius: 8, padding: "7px 10px", fontSize: 12,
+                    }}>
+                      <span style={{ color: "var(--text-dim)", fontSize: 11 }}>#{move.task_id}</span>
+                      <strong style={{ minWidth: 130 }}>
+                        {formatBATime(move.from || "")} → {formatBATime(move.to)}
+                      </strong>
+                      <span>{original ? taskName(original) : (move.task_type || "tarea")}</span>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+            <div className="ap-modal-foot">
+              <button className="ap-btn ap-btn-ghost ap-btn-sm" onClick={() => setCascadePlan(null)}>Cancelar</button>
+              <button
+                className="ap-btn ap-btn-primary ap-btn-sm"
+                disabled={Boolean(actionBusy)}
+                onClick={confirmCascade}
+              >
+                {actionBusy ? "Aplicando…" : "Confirmar cascada"}
               </button>
             </div>
           </div>
