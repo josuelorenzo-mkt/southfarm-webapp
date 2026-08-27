@@ -120,7 +120,7 @@ interface ChartProps {
   nowRatio: number | null;
   weekDays: string[];
   dayTasks: DayTaskInfo[];
-  onOpenDay: (dateKey: string) => void;
+  onOpenDay: (dateKey: string, clusterId: number) => void;
   onMoveTask: (task: WeekTask) => void;
   onCancelTask: (task: WeekTask) => void;
   canManage: boolean;
@@ -228,9 +228,9 @@ function Chart({ cluster, metric, todayIndex, nowRatio, weekDays, dayTasks, onOp
               key={dateKey}
               className={`ap-glass-col ${glassClass(i)}`}
               style={{ transitionDelay: `${i * 45}ms` }}
-              onClick={() => onOpenDay(dateKey)}
+              onClick={() => onOpenDay(dateKey, cluster.id)}
               role="button"
-              aria-label={`Ver día ${shortDate(dateKey)}`}
+              aria-label={`Ver el día ${shortDate(dateKey)} del clúster ${cluster.name}`}
               cursor="pointer"
             >
               <rect className="ap-glass-body" x={x0 + gap} y={TOP - 6} width={w - gap * 2} height={INNER_H + 12} rx={9} />
@@ -361,7 +361,7 @@ interface RowProps {
   canManage: boolean;
   actionBusy: string;
   onOpenCluster: (id: number) => void;
-  onOpenDay: (dateKey: string) => void;
+  onOpenDay: (dateKey: string, clusterId: number) => void;
   onConfirmCluster: (id: number) => void;
   onRejectCluster: (id: number) => void;
   onMoveTask: (task: WeekTask) => void;
@@ -578,7 +578,7 @@ interface PlannerWeekProps {
   week: WeekResponse;
   canManage: boolean;
   onOpenCluster: (id: number) => void;
-  onOpenDay: (dateKey: string) => void;
+  onOpenDay: (dateKey: string, clusterId: number) => void;
   onChanged: () => void;
 }
 

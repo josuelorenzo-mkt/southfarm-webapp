@@ -217,6 +217,9 @@ interface DayViewProps {
   date: string;
   day: DayResponse;
   canManage: boolean;
+  /** Fase 2.5: si viene, la vista es la agenda de UN clúster (no del workspace). */
+  clusterId?: number | null;
+  clusterName?: string | null;
   onBackToWeek: () => void;
   onPrevDay: () => void;
   onNextDay: () => void;
@@ -225,7 +228,7 @@ interface DayViewProps {
   onChanged: () => void;
 }
 
-export default function DayView({ token, date, day, canManage, onBackToWeek, onPrevDay, onNextDay, onGoToToday, onChanged }: DayViewProps) {
+export default function DayView({ token, date, day, canManage, clusterId = null, clusterName = null, onBackToWeek, onPrevDay, onNextDay, onGoToToday, onChanged }: DayViewProps) {
   const [filters, setFilters] = useState<{ warmup: boolean; scan: boolean; publish: boolean; late: boolean }>({
     warmup: true,
     scan: true,
@@ -440,9 +443,19 @@ export default function DayView({ token, date, day, canManage, onBackToWeek, onP
 
       <section className="ap-day-head">
         <div>
-          <p className="ap-eyebrow ap-eyebrow-accent">CALENDARIO DEL DÍA</p>
-          <h2>El día, <em>tarea por tarea.</em></h2>
-          <p>12:00–22:00 de Buenos Aires · un teléfono ejecuta una tarea a la vez.</p>
+          {clusterName ? (
+            <>
+              <p className="ap-eyebrow ap-eyebrow-accent">AGENDA DEL CLÚSTER · BUENOS AIRES</p>
+              <h2>{clusterName}: <em>su día, tarea por tarea.</em></h2>
+              <p>Solo las actividades de este clúster · los demás clústeres no molestan acá.</p>
+            </>
+          ) : (
+            <>
+              <p className="ap-eyebrow ap-eyebrow-accent">CALENDARIO DEL DÍA</p>
+              <h2>El día, <em>tarea por tarea.</em></h2>
+              <p>Todos los clústeres juntos · un teléfono ejecuta una tarea a la vez.</p>
+            </>
+          )}
         </div>
         <div className="ap-day-controls">
           <div className="ap-week-range">

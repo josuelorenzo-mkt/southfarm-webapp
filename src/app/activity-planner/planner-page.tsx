@@ -34,6 +34,13 @@ export default function PlannerPage({ token, canManage }: PlannerPageProps) {
   const [weekStart, setWeekStart] = useState<string>(() => currentWeekStart());
   const [dayDate, setDayDate] = useState<string>(() => buenosAiresToday());
   const [clusterId, setClusterId] = useState<number | null>(null);
+  /**
+   * Fase 2.5: la vista DÍA tiene dos modos — completa del workspace (null) o
+   * scopped a UN clúster (id). Desde la semana, clic en un día dentro de un
+   * clúster abre el día de ESE clúster; el botón "Ver día de hoy"/tab "Día"
+   * abre la vista general.
+   */
+  const [dayClusterId, setDayClusterId] = useState<number | null>(null);
 
   const [week, setWeek] = useState<WeekResponse | null>(null);
   const [day, setDay] = useState<DayResponse | null>(null);
@@ -79,11 +86,11 @@ export default function PlannerPage({ token, canManage }: PlannerPageProps) {
     }
   }, [token]);
 
-  const loadDay = useCallback(async (date: string, silent = false) => {
+  const loadDay = useCallback(async (date: string, silent = false, scopedClusterId: number | null = null) => {
     const seq = ++requestSeq.current;
     setError("");
     try {
-      const data = await plannerApi.getDay(token, date);
+      const data = await plannerApi.getDay(token, date, scopedClusterId);
       if (seq !== requestSeq.current) return;
       setDay(data);
       setLastSync(new Date().toISOString());
@@ -97,17 +104,17 @@ export default function PlannerPage({ token, canManage }: PlannerPageProps) {
   }, [token]);
 
   const reloadCurrent = useCallback((silent = false) => {
-    if (view === "day") void loadDay(dayDate, silent);
+    if (view === "day") void loadDay(dayDate, silent, dayClusterId);
     else void loadWeek(weekStart, silent);
-  }, [view, dayDate, weekStart, loadDay, loadWeek]);
+  }, [view, dayDate, dayClusterId, weekStart, loadDay, loadWeek]);
 
   useEffect(() => {
     const task = window.setTimeout(() => {
-      if (view === "day") void loadDay(dayDate);
+      if (view === "day") void loadDay(dayDate, false, dayClusterId);
       else void loadWeek(weekStart);
     }, 0);
     return () => window.clearTimeout(task);
-  }, [view, weekStart, dayDate, loadDay, loadWeek]);
+  }, [view, weekStart, dayDate, dayClusterId, loadDay, loadWeek]);
 
   useEffect(() => {
     const interval = window.setInterval(() => reloadCurrent(true), 10000);
@@ -129,12 +136,32 @@ export default function PlannerPage({ token, canManage }: PlannerPageProps) {
 
   const navigateDay = (delta: number) => {
     setDayDate((current) => shiftDateKey(current, delta));
+    // Moverse de día PRESERVA el scope: dentro del mismo clúster o general.
     setView("day");
   };
 
-  const openDay = (dateKey: string) => {
+  /** openDay(dateKey, clusterId) — con clúster = vista día DE ESE clúster. */
+  const openDay = (dateKey: string, scopedClusterId: number | null = null) => {
     setDayDate(dateKey);
+    setDayClusterId(scopedClusterId);
     setView("day");
+  };
+
+  /** Tabs "Día" (completa) y "Día clúster" — la segunda conserva el último clúster. */
+  const openGeneralDay = () => {
+    setDayClusterId(null);
+    setView("day");
+  };
+
+  const openClusterDay = () => {
+    if (dayClusterId !== null) {
+      setView("day");
+      return;
+    }
+    if (clusterId !== null) {
+      setDayClusterId(clusterId);
+      setView("day");
+    }
   };
 
   const openCluster = (id: number) => {
@@ -183,7 +210,7 @@ export default function PlannerPage({ token, canManage }: PlannerPageProps) {
     const todayWeek = currentWeekStart();
     if (view === "day") {
       setDayDate(buenosAiresToday());
-      void loadDay(buenosAiresToday());
+      void loadDay(buenosAiresToday(), false, dayClusterId);
     } else {
       setWeekStart(todayWeek);
       void loadWeek(todayWeek);
@@ -212,7 +239,7 @@ export default function PlannerPage({ token, canManage }: PlannerPageProps) {
                 <button title="Semana siguiente" aria-label="Semana siguiente" onClick={() => navigateWeek(1)}><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6-6-6" /></svg></button>
               </div>
               <button className="ap-btn" onClick={goToToday}>Hoy</button>
-              <button className="ap-btn ap-btn-primary" onClick={() => openDay(todayKey)}>
+              <button className="ap-btn ap-btn-primary" onClick={() => openDay(todayKey, null)}>
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3.5" y="4.5" width="17" height="16" rx="2.5" /><path d="M3.5 9.5h17M8 3v3M16 3v3" /></svg>
                 Ver día de hoy
               </button>
@@ -245,11 +272,26 @@ export default function PlannerPage({ token, canManage }: PlannerPageProps) {
               </button>
             )}
             {view === "day" && (
-              <button className="ap-btn" onClick={() => void loadDay(dayDate)} disabled={loading}>Sincronizar<span>↻</span></button>
+              <button className="ap-btn" onClick={() => void loadDay(dayDate, false, dayClusterId)} disabled={loading}>Sincronizar<span>↻</span></button>
             )}
-            <div className="ap-segmented" style={{ minWidth: 260 }} role="tablist" aria-label="Vista del planner">
+            <div className="ap-segmented" style={{ minWidth: 330 }} role="tablist" aria-label="Vista del planner">
               <button className={view === "week" ? "is-selected" : ""} onClick={() => setView("week")}>Semana</button>
-              <button className={view === "day" ? "is-selected" : ""} onClick={() => setView("day")}>Día</button>
+              {/* Dos entradas distintas para la vista DÍA (Fase 2.5): completa
+                  del workspace vs scopped al clúster seleccionado. */}
+              <button
+                className={view === "day" && dayClusterId === null ? "is-selected" : ""}
+                onClick={openGeneralDay}
+              >
+                Día completo
+              </button>
+              <button
+                className={view === "day" && dayClusterId !== null ? "is-selected" : ""}
+                disabled={clusterId === null && dayClusterId === null}
+                title={clusterId === null && dayClusterId === null ? "Entrá desde la semana haciendo clic en un día dentro de un clúster" : undefined}
+                onClick={() => clusterId !== null || dayClusterId !== null ? openClusterDay() : undefined}
+              >
+                Día clúster
+              </button>
               <button className={view === "cluster" ? "is-selected" : ""} disabled={!clusterId} onClick={() => clusterId && setView("cluster")}>Cluster</button>
               <button className={view === "routines" ? "is-selected" : ""} disabled={!clusterId} onClick={() => clusterId && setView("routines")}>Rutinas</button>
             </div>
@@ -318,12 +360,18 @@ export default function PlannerPage({ token, canManage }: PlannerPageProps) {
               token={token}
               date={dayDate}
               day={day}
+              clusterId={dayClusterId}
+              clusterName={
+                dayClusterId !== null
+                  ? (week?.clusters.find((candidate) => candidate.id === dayClusterId)?.name || `Clúster #${dayClusterId}`)
+                  : null
+              }
               canManage={canManage}
               onBackToWeek={() => setView("week")}
               onPrevDay={() => navigateDay(-1)}
               onNextDay={() => navigateDay(1)}
               onGoToToday={goToToday}
-              onChanged={() => void loadDay(dayDate, true)}
+              onChanged={() => void loadDay(dayDate, true, dayClusterId)}
             />
           ) : (
             <div className="ap-empty"><strong>No se pudo cargar el día</strong><span>Revisá la conexión con la API e intentá de nuevo.</span></div>

@@ -194,6 +194,8 @@ export interface DayHourly {
 
 export interface DayResponse {
   date: string;
+  /** Fase 2.5: null = vista día completa del workspace; número = scopped a un clúster. */
+  cluster_id?: number | null;
   tasks: DayTask[];
   /** 12..22 */
   hourly: DayHourly[];

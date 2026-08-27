@@ -90,10 +90,13 @@ export const plannerApi = {
     return plannerRequest<WeekResponse>(`/api/planner/week${query}`, token);
   },
 
-  /** GET /api/planner/day?date=YYYY-MM-DD */
-  getDay(token: string, date?: string): Promise<DayResponse> {
-    const query = date ? `?date=${encodeURIComponent(date)}` : "";
-    return plannerRequest<DayResponse>(`/api/planner/day${query}`, token);
+  /** GET /api/planner/day?date=YYYY-MM-DD[&cluster_id=N] — completo o de UN clúster. */
+  getDay(token: string, date?: string, clusterId?: number | null): Promise<DayResponse> {
+    const params = new URLSearchParams();
+    if (date) params.set("date", date);
+    if (clusterId != null) params.set("cluster_id", String(clusterId));
+    const query = params.toString();
+    return plannerRequest<DayResponse>(`/api/planner/day${query ? `?${query}` : ""}`, token);
   },
 
   /** GET /api/clusters */
