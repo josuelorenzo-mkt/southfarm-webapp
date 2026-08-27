@@ -184,17 +184,17 @@ export function LiveViewToggle({ active, onClick }: { active: boolean; onClick: 
       type="button"
       className={`cc-button ${active ? "cc-button-muted" : "cc-button-ghost"} cc-live-toggle`}
       onClick={onClick}
-      aria-label={active ? "Detener vista en vivo" : "Ver pantalla del dispositivo"}
+      aria-label={active ? "Ocultar vista en vivo" : "Ver pantalla del dispositivo"}
     >
-      <span aria-hidden="true">{active ? "■" : "▶"}</span>
-      {active ? "Detener" : "Ver pantalla"}
+      <span aria-hidden="true">{active ? "⌃" : "▶"}</span>
+      {active ? "Ocultar pantalla" : "Ver pantalla"}
     </button>
   );
 }
 
 type LivePhase = "idle" | "connecting" | "live" | "error";
 
-export function DeviceLiveView({ bridgeUrl, deviceAlias, onClose }: { bridgeUrl: string; deviceAlias: string; onClose: () => void }) {
+export function DeviceLiveView({ bridgeUrl, deviceAlias }: { bridgeUrl: string; deviceAlias: string }) {
   const devicesState = useScreenBridgeDevices(bridgeUrl);
   const [, setAttempt] = useState(0);
   const [serial, setSerial] = useState<string | null>(null);
@@ -206,8 +206,13 @@ export function DeviceLiveView({ bridgeUrl, deviceAlias, onClose }: { bridgeUrl:
   // de recuperación sin cortar socket ni decoder.
   const [recovering, setRecovering] = useState(false);
   const [liveStats, setLiveStats] = useState<LiveStats>(INITIAL_LIVE_STATS);
+  // Ratio real del video (del frame decodificado): el contenedor lo usa como
+  // aspect-ratio para que la pantalla transmitida nunca quede recortada ni
+  // deformada sin importar la relación de aspecto del teléfono.
+  const [videoRatio, setVideoRatio] = useState<string | null>(null);
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const videoRatioRef = useRef<string | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const decoderRef = useRef<VideoDecoder | null>(null);
   const fpsIntervalRef = useRef<number | null>(null);
@@ -353,6 +358,11 @@ export function DeviceLiveView({ bridgeUrl, deviceAlias, onClose }: { bridgeUrl:
       if (decodedFrames === 1) {
         setPhase("live");
         stableSessionAtRef.current = performance.now(); // arranque de la sesión "estable"
+      }
+      const ratio = `${frame.displayWidth} / ${frame.displayHeight}`;
+      if (videoRatioRef.current !== ratio) {
+        videoRatioRef.current = ratio;
+        setVideoRatio(ratio);
       }
       // Progreso saludable sostenido: los errores aislados viejos no se acumulan
       // hasta matar la vista en sesiones largas.
@@ -611,11 +621,6 @@ export function DeviceLiveView({ bridgeUrl, deviceAlias, onClose }: { bridgeUrl:
     setAttempt((value) => value + 1);
   }, [teardown]);
 
-  const stopAndClose = useCallback(() => {
-    teardown();
-    onClose();
-  }, [teardown, onClose]);
-
   /** Botón ⟳: corta la conexión actual y reconecta al instante, sin esperar backoff. */
   const forceReconnect = useCallback(() => {
     if (!serial) return;
@@ -660,11 +665,10 @@ export function DeviceLiveView({ bridgeUrl, deviceAlias, onClose }: { bridgeUrl:
               </svg>
             </button>
           )}
-          <button type="button" className="cc-live-close" title="Cerrar vista en vivo" aria-label="Cerrar vista en vivo" onClick={stopAndClose}>×</button>
         </div>
       </div>
 
-      <div className="cc-live-canvas-wrap">
+      <div className="cc-live-canvas-wrap" style={videoRatio ? { aspectRatio: videoRatio } : undefined}>
         <canvas ref={canvasRef} className="cc-live-canvas" role="img" aria-label={`Transmisión en vivo de ${deviceAlias}`} />
         {((phase !== "live" && phase !== "connecting") || recoveringView) && (
           <div className="cc-live-placeholder">
@@ -716,12 +720,6 @@ export function DeviceLiveView({ bridgeUrl, deviceAlias, onClose }: { bridgeUrl:
           <span>Error: {errorMessage}</span>
           <button type="button" className="cc-button cc-button-ghost" onClick={retry}>Reintentar</button>
         </div>
-      )}
-
-      {(phase === "connecting" || phase === "live") && (
-        <button type="button" className="cc-button cc-button-muted cc-live-stop" onClick={stopAndClose}>
-          <span aria-hidden="true">■</span>Detener
-        </button>
       )}
     </section>
   );
