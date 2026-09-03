@@ -4,8 +4,8 @@
  * Vista de día del Activity Planner — porte de docs/mockups/activity-planner/day-view.html
  * con datos reales de GET /api/planner/day.
  *
- * v3: timeline con scroll propio, indicador AHORA proporcional (12:00–22:00 BA,
- * clamp atenuado fuera de rango, refresco cada 30 s, auto-scroll al montar) y
+ * v3→v6: timeline ABSOLUTO de 24 hs con scroll completo (00:00–24:00 BA),
+ * indicador AHORA, casilleros de 5', drag  drop fino y cascada con vista previa.
  * drag & drop por tarea INDIVIDUAL con modal de confirmación.
  */
 import "./planner-extra.css";
@@ -25,10 +25,10 @@ import {
 import QuickAddPanel from "./quick-add-panel";
 import type { ClusterAccount, DayResponse, DayTask, PlannerTaskType } from "./types";
 
-const HOURS = [12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22];
-/** Ventana 12:00–22:00 BA en minutos desde las 0:00. */
-const WINDOW_START_MIN = 12 * 60;
-const WINDOW_END_MIN = 22 * 60;
+/** Día COMPLETO: 24 horas (00:00–24:00 BA) con scroll — sin ventana recortada. */
+const HOURS = Array.from({ length: 24 }, (_, i) => i);
+const WINDOW_START_MIN = 0;
+const WINDOW_END_MIN = 24 * 60;
 /** Fase 2.5-visual: el timeline se posiciona ABSOLUTAMENTE por minuto.
     2 px por minuto ⇒ cada hora mide 120 px, los casilleros de 5' miden 10 px. */
 export const PX_PER_MIN = 2;
@@ -119,11 +119,8 @@ function baTimeOfMinutes(minutes: number): string {
  * Posición px del marcador AHORA sobre el track absoluto: matemática directa
  * (minutos transcurridos × escala). Fuera de 12–22 BA devuelve null (oculto).
  */
-function nowMarkerTopPx(nowIso: string): { px: number; outOfRange: boolean } {
-  const minutes = baMinutesOf(nowIso);
-  if (minutes < WINDOW_START_MIN) return { px: 0, outOfRange: true };
-  if (minutes >= WINDOW_END_MIN) return { px: TRACK_HEIGHT_PX, outOfRange: true };
-  return { px: minuteToPx(minutes), outOfRange: false };
+function nowMarkerTopPx(nowIso: string): number {
+  return minuteToPx(baMinutesOf(nowIso));
 }
 
 interface LaidOutTask {
@@ -325,10 +322,8 @@ export default function DayView({ token, date, day, canManage, clusterId = null,
   const queued = day.tasks.filter((task) => ["pending", "paused"].includes(task.status));
   const late = day.tasks.filter((task) => task.status === "overdue" || task.status === "expired");
 
-  /* Marcador AHORA: derivado en render — matemática directa minutos × escala px.
-     Fuera de la ventana 12–22 queda ANCLADO al borde correspondiente, atenuado,
-     para seguir dando referencia del momento del día. */
-  const nowMarkerState = nowMarkerTopPx(nowIso);
+  /* Marcador AHORA: derivado en render — matemática directa minutos × escala px. */
+  const nowMarkerPxValue = nowMarkerTopPx(nowIso);
 
   /* Auto-scroll suave a la posición actual al montar (una sola vez). */
   useEffect(() => {
@@ -336,9 +331,7 @@ export default function DayView({ token, date, day, canManage, clusterId = null,
     const task = window.setTimeout(() => {
       const timeline = timelineRef.current;
       if (!timeline) return;
-      const marker = nowMarkerTopPx(nowIso);
-      if (marker.outOfRange) return; // fuera de la ventana 12:00–22:00: no se fuerza scroll
-      const px = marker.px;
+      const px = nowMarkerTopPx(nowIso);
       timeline.scrollTo({ top: Math.max(0, px - timeline.clientHeight / 3), behavior: "smooth" });
       scrolledToNowRef.current = true;
     }, 0);
@@ -575,7 +568,7 @@ export default function DayView({ token, date, day, canManage, clusterId = null,
         <section className="ap-card">
           <div className="ap-card-heading">
             <div>
-              <p className="ap-eyebrow">TIMELINE · 12:00–22:00</p>
+              <p className="ap-eyebrow">TIMELINE · 00:00–24:00</p>
               <h3>Agenda del día</h3>
               <p className="ap-card-subtitle">Cada bloque: hora, tipo, cluster, cuenta, celular asignado y estado.</p>
             </div>
@@ -656,8 +649,8 @@ export default function DayView({ token, date, day, canManage, clusterId = null,
 
               {/* Indicador AHORA sobre la escala real del track. */}
               <div
-                className={`ap-now-marker ${nowMarkerState.outOfRange ? "is-out-of-range" : ""}`}
-                style={{ top: `${Math.max(0, Math.min(TRACK_HEIGHT_PX, nowMarkerState.px) - 1)}px` }}
+                className="ap-now-marker"
+                style={{ top: `${Math.min(TRACK_HEIGHT_PX, nowMarkerPxValue) - 1}px` }}
                 role="status"
                 aria-label={`Ahora: ${baTimeOfMinutes(baMinutesOf(nowIso))} Buenos Aires`}
               >
@@ -708,7 +701,7 @@ export default function DayView({ token, date, day, canManage, clusterId = null,
               <div>
                 <p className="ap-eyebrow">LOAD BY HOUR</p>
                 <h3>Carga del día</h3>
-                <p className="ap-card-subtitle">Tareas por hora en la ventana 12:00–22:00.</p>
+                <p className="ap-card-subtitle">Tareas por hora del día completo.</p>
               </div>
             </div>
             <div className="ap-load-strip">
