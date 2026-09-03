@@ -1015,3 +1015,89 @@
 
 /* Hora de fin estimada dentro de la tarjeta (más tenue que el inicio). */
 .ap-planner .ap-task-end { color: var(--text-dim); font-weight: 700; }
+
+/* ═══ Vista compacta "Día completo": carril por hora, tarjetas apiladas ═══ */
+.ap-planner .ap-cgrid { position: relative; padding-left: 64px; }
+.ap-planner .ap-cgrid::before {
+  content: ""; position: absolute; left: 56px; top: 0; bottom: 0;
+  width: 1px; background: rgba(255, 255, 255, .14);
+}
+.ap-planner .ap-c-hour {
+  position: absolute; left: 6px; width: 46px;
+  transform: translateY(-50%);
+  display: inline-flex; justify-content: center;
+  padding: 2px 0; border-radius: 999px;
+  color: var(--text-dim); font-size: 10px; font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.ap-planner .ap-c-hour.is-now {
+  color: #bbf7d0; border: 1px solid rgba(134, 239, 172, .45);
+  background: rgba(9, 9, 11, .92);
+}
+.ap-planner .ap-c-row { position: absolute; left: 0; right: 0; border-top: 1px solid rgba(255, 255, 255, .05); }
+.ap-planner .ap-c-nowrow {
+  position: absolute; left: 0; right: 0;
+  background: rgba(134, 239, 172, .055);
+  border-top: 1px solid rgba(134, 239, 172, .25);
+  border-bottom: 1px solid rgba(134, 239, 172, .25);
+  pointer-events: none; z-index: 1;
+}
+.ap-planner .ap-c-lane {
+  position: absolute; inset: 0; left: 6px;
+  display: flex; gap: 8px; align-items: stretch;
+  overflow-x: auto; overflow-y: hidden;
+  padding: 8px 8px 6px;
+  scrollbar-width: thin; scrollbar-color: rgba(255,255,255,.2) transparent;
+}
+/* Mini tarjeta */
+.ap-planner .ap-mini {
+  flex: 0 0 auto; width: 172px;
+  display: flex; flex-direction: column; gap: 2px;
+  padding: 6px 9px; border-radius: 10px; text-align: left;
+  border: 1px solid rgba(255, 255, 255, .13); border-left-width: 3px;
+  background: rgba(255, 255, 255, .03);
+  color: inherit; cursor: pointer;
+  transition: border-color .15s ease, background .15s ease, transform .15s ease;
+}
+.ap-planner .ap-mini:hover { background: rgba(255, 255, 255, .06); transform: translateY(-1px); }
+.ap-planner .ap-mini-top { display: flex; justify-content: space-between; align-items: center; gap: 6px; }
+.ap-planner .ap-mini-kind { display: inline-flex; align-items: center; gap: 4px; font-size: 10px; font-weight: 800; letter-spacing: .04em; }
+.ap-planner .ap-mini.k-warmup .ap-mini-kind { color: #4ade80; }
+.ap-planner .ap-mini.k-scan .ap-mini-kind { color: #93c5fd; }
+.ap-planner .ap-mini.k-publish .ap-mini-kind { color: #e879f9; }
+.ap-planner .ap-mini-dev {
+  font-size: 9px; font-weight: 800; font-variant-numeric: tabular-nums;
+  padding: 1px 6px; border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, .18); background: rgba(9, 9, 11, .8);
+}
+.ap-planner .ap-mini-time { font-size: 12px; font-weight: 800; font-variant-numeric: tabular-nums; color: var(--text, #fff); }
+.ap-planner .ap-mini-user { font-size: 10px; color: var(--text-muted, #a1a1aa); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ap-planner .ap-mini.is-done { opacity: .48; }
+.ap-planner .ap-mini.is-late { border-color: rgba(250, 204, 21, .5); }
+/* Ejecutándose AHORA: pulso en el borde. */
+.ap-planner .ap-mini.is-running {
+  border-color: rgba(134, 239, 172, .85);
+  animation: apMiniPulse 1.6s ease-out infinite;
+}
+@keyframes apMiniPulse {
+  0% { box-shadow: 0 0 0 0 rgba(134, 239, 172, .45); }
+  100% { box-shadow: 0 0 0 9px rgba(134, 239, 172, 0); }
+}
+/* Pill 
+/* Pill del AHORA dentro de la grilla compacta: gutter izquierdo. */
+.ap-planner .ap-cgrid .ap-now-marker { left: 64px; right: 6px; }
+
+/* Modal de detalle */
+.ap-planner .ap-detail-row { display: flex; gap: 10px; padding: 4px 0; font-size: 12.5px; }
+.ap-planner .ap-detail-row dt {
+  width: 84px; flex: 0 0 84px; margin: 0;
+  color: #a1a1aa; font-size: 9.5px; font-weight: 800;
+  letter-spacing: .1em; text-transform: uppercase; padding-top: 2px;
+}
+.ap-planner .ap-detail-row dd { margin: 0; display: flex; align-items: center; gap: 5px; }
+.ap-planner .ap-detail-row dd svg { flex: 0 0 auto; }
+.ap-planner .ap-detail-move {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  margin-top: 10px; padding-top: 10px;
+  border-top: 1px solid rgba(255, 255, 255, .1);
+}

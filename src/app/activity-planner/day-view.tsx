@@ -33,6 +33,11 @@ const WINDOW_END_MIN = 24 * 60;
     3 px por minuto ⇒ cada hora mide 180 px; un scan de 10' (30 px) convive
     con el alto mínimo de tarjeta sin invadir el turno siguiente. */
 export const PX_PER_MIN = 3;
+/** Vista compacta "Día completo": alto fijo de cada carril-hora. */
+const COMPACT_ROW_H = 76;
+const KIND_LABEL: Record<"warmup" | "scan" | "publish", string> = {
+  warmup: "Warmup", scan: "Scan", publish: "Post",
+};
 const TRACK_TOTAL_MIN = WINDOW_END_MIN - WINDOW_START_MIN;
 const TRACK_HEIGHT_PX = TRACK_TOTAL_MIN * PX_PER_MIN;
 /** Snap del drop: cada 5 minutos (los "casilleros"). */
@@ -303,6 +308,9 @@ export default function DayView({ token, date, day, canManage, clusterId = null,
   const timelineRef = useRef<HTMLDivElement | null>(null);
   const trackRef = useRef<HTMLDivElement | null>(null);
   const scrolledToNowRef = useRef(false);
+  /** Vista compacta (día completo): tarea expandida en modal. */
+  const [detailTask, setDetailTask] = useState<DayTask | null>(null);
+  const [detailMoveTime, setDetailMoveTime] = useState("");
 
   useEffect(() => {
     const interval = window.setInterval(() => setNowIso(new Date().toISOString()), NOW_REFRESH_MS);
@@ -329,6 +337,22 @@ export default function DayView({ token, date, day, canManage, clusterId = null,
 
   /** Layout absoluto con carriles para encimadas entre teléfonos distintos. */
   const laidOutTasks = useMemo(() => layOutTasks(visibleTasks), [visibleTasks]);
+
+  /** Vista compacta: tareas agrupadas por hora, ordenadas por minuto. */
+  const compactByHour = useMemo(() => {
+    const map = new Map<number, DayTask[]>();
+    for (const task of visibleTasks) {
+      const minute = baMinutesOf(task.scheduledFor || "");
+      const hour = Math.min(23, Math.floor(minute / 60));
+      const list = map.get(hour) || [];
+      list.push(task);
+      map.set(hour, list);
+    }
+    for (const list of map.values()) {
+      list.sort((a, b) => baMinutesOf(a.scheduledFor || "") - baMinutesOf(b.scheduledFor || ""));
+    }
+    return map;
+  }, [visibleTasks]);
 
   const running = day.tasks.filter((task) => task.status === "running");
   const completed = day.tasks.filter((task) => task.status === "completed");
@@ -489,6 +513,18 @@ export default function DayView({ token, date, day, canManage, clusterId = null,
     }
   };
 
+  /** Detalle (vista compacta): abrir ficha y mover/cancelar desde el modal. */
+  const openDetail = (task: DayTask) => {
+    setDetailTask(task);
+    setDetailMoveTime(formatBATime(task.scheduledFor || ""));
+  };
+  const doDetailMove = () => {
+    if (!detailTask) return;
+    const task = detailTask;
+    setDetailTask(null);
+    performMove(task, new Date(`${baDateKeyOf(task.scheduledFor || "")}T${detailMoveTime}:00-03:00`).toISOString());
+  };
+
   const confirmCascade = () => {
     if (!cascadePlan) return;
     const { task, requestedFor } = cascadePlan;
@@ -587,7 +623,8 @@ export default function DayView({ token, date, day, canManage, clusterId = null,
             </div>
             <span className="ap-badge ap-badge-live"><span className="ap-badge-dot" />{running.length} ejecutando</span>
           </div>
-          <div className="ap-timeline-scroll" ref={timelineRef} role="region" aria-label="Timeline del día, scrolleable">
+          <div className="ap-timeline-scroll" ref={timelineRef} role="region" aria-label="Agenda del día, scrolleable">
+            {clusterId != null ? (
             <div className="ap-day-track-wrap">
               {/* REGLA: columna propia a la IZQUIERDA del track — los rótulos
                   de hora viven acá y ninguna tarjeta puede taparlos. Ticks
@@ -672,6 +709,59 @@ export default function DayView({ token, date, day, canManage, clusterId = null,
               </div>
               </div>
             </div>
+            ) : (
+            <div className="ap-cgrid" style={{ height: 24 * COMPACT_ROW_H }}>
+              <div className="ap-c-nowrow" style={{ top: baHourOf(nowIso) * COMPACT_ROW_H, height: COMPACT_ROW_H }} />
+              {HOURS.map((hour) => (
+                <span
+                  key={hour}
+                  className={`ap-c-hour ${hour === baHourOf(nowIso) ? "is-now" : ""}`}
+                  style={{ top: hour * COMPACT_ROW_H }}
+                >
+                  {String(hour).padStart(2, "0")}:00
+                </span>
+              ))}
+              {HOURS.map((hour) => (
+                <div className="ap-c-row" key={hour} style={{ top: hour * COMPACT_ROW_H, height: COMPACT_ROW_H }}>
+                  <div className="ap-c-lane">
+                    {(compactByHour.get(hour) || []).map((task) => {
+                      const kind = taskKind(task.taskType);
+                      const endIso = task.durationMin != null && task.durationMin > 0
+                        ? new Date(Date.parse(task.scheduledFor || "") + task.durationMin * 60e3).toISOString()
+                        : null;
+                      return (
+                        <button
+                          key={task.id}
+                          type="button"
+                          className={`ap-mini k-${kind} ${task.status === "running" ? "is-running" : ""} ${task.status === "completed" ? "is-done" : ""} ${["overdue", "expired"].includes(task.status) ? "is-late" : ""}`}
+                          style={{ borderLeftColor: deviceColor(task.deviceAlias || null) }}
+                          onClick={() => { setDetailTask(task); setDetailMoveTime(formatBATime(task.scheduledFor || "")); }}
+                        >
+                          <span className="ap-mini-top">
+                            <span className="ap-mini-kind">{TASK_ICONS[kind]}{KIND_LABEL[kind]}</span>
+                            <span className="ap-mini-dev">{task.deviceAlias || "—"}</span>
+                          </span>
+                          <strong className="ap-mini-time">
+                            {formatBATime(task.scheduledFor || "")}{endIso ? ` → ${formatBATime(endIso)}` : ""}
+                          </strong>
+                          <span className="ap-mini-user">@{task.username || "—"}{task.clusterName ? ` · ${task.clusterName}` : ""}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+              <div
+                className="ap-now-marker"
+                style={{ top: `${(baMinutesOf(nowIso) / 60) * COMPACT_ROW_H - 1}px` }}
+                role="status"
+                aria-label={`Ahora: ${baTimeOfMinutes(baMinutesOf(nowIso))} Buenos Aires`}
+              >
+                <span className="ap-now-flag">AHORA</span>
+                <span className="ap-now-time">{baTimeOfMinutes(baMinutesOf(nowIso))}</span>
+              </div>
+            </div>
+            )}
           </div>
         </section>
 
@@ -799,6 +889,77 @@ export default function DayView({ token, date, day, canManage, clusterId = null,
           </div>
         </div>
       )}
+
+      {/* Vista compacta: ficha expandida de la tarea (click en mini-card). */}
+      {detailTask && (() => {
+        const kind = taskKind(detailTask.taskType);
+        const endIso = detailTask.durationMin != null && detailTask.durationMin > 0
+          ? new Date(Date.parse(detailTask.scheduledFor || "") + detailTask.durationMin * 60e3).toISOString()
+          : null;
+        return (
+          <div
+            className="ap-modal-overlay"
+            role="dialog"
+            aria-modal="true"
+            aria-label={`Detalle de la tarea #${detailTask.id}`}
+            onClick={(event) => { if (event.target === event.currentTarget) setDetailTask(null); }}
+          >
+            <div className="ap-modal ap-detail">
+              <div className="ap-modal-head">
+                <div>
+                  <p className="ap-eyebrow ap-eyebrow-accent">DETALLE DE TAREA · #{detailTask.id}</p>
+                  <h3>{taskName(detailTask)}</h3>
+                </div>
+                <button className="ap-icon-btn" title="Cerrar" onClick={() => setDetailTask(null)}>×</button>
+              </div>
+              <div className="ap-modal-body">
+                <div className="ap-detail-row"><dt>Estado</dt><dd>
+                  <span className={`ap-badge ${detailTask.status === "running" ? "ap-badge-live" : ["overdue", "expired"].includes(detailTask.status) ? "ap-badge-warn" : detailTask.status === "error" ? "ap-badge-bad" : "ap-badge-neutral"}`}>
+                    <span className="ap-badge-dot" />{STATUS_LABELS[detailTask.status] || detailTask.status}
+                  </span>
+                </dd></div>
+                <div className="ap-detail-row"><dt>Tipo</dt><dd>{TASK_ICONS[kind]} {KIND_LABEL[kind]} · {detailTask.platform ? (PLATFORM_META[detailTask.platform]?.short || detailTask.platform) : ""}</dd></div>
+                <div className="ap-detail-row"><dt>Cuenta</dt><dd>@{detailTask.username || "—"}</dd></div>
+                <div className="ap-detail-row"><dt>Teléfono</dt><dd style={{ color: deviceColor(detailTask.deviceAlias || null), fontWeight: 800 }}>{detailTask.deviceAlias || "—"}</dd></div>
+                <div className="ap-detail-row"><dt>Clúster</dt><dd>{detailTask.clusterName || "—"}</dd></div>
+                <div className="ap-detail-row"><dt>Horario</dt><dd>
+                  <strong>{formatBATime(detailTask.scheduledFor || "")}{endIso ? ` → ${formatBATime(endIso)}` : ""}</strong>
+                  {detailTask.durationMin != null ? ` · ${detailTask.durationMin} min` : ""}
+                </dd></div>
+                <div className="ap-detail-row"><dt>Origen</dt><dd>{detailTask.source === "manual" ? "Manual" : "Automática (rutina)"}</dd></div>
+                <div className="ap-detail-move">
+                  <input
+                    type="time"
+                    className="ap-qa-time"
+                    value={detailMoveTime}
+                    step={300}
+                    aria-label="Nueva hora para mover la tarea"
+                    onChange={(event) => setDetailMoveTime(event.target.value || detailMoveTime)}
+                  />
+                  <button
+                    className="ap-btn ap-btn-sm"
+                    disabled={Boolean(actionBusy)}
+                    onClick={() => { const t = detailTask; setDetailTask(null); performMove(t, new Date(`${baDateKeyOf(t.scheduledFor || "")}T${detailMoveTime}:00-03:00`).toISOString()); }}
+                  >
+                    Mover a esa hora
+                  </button>
+                  <span className="ap-qa-note">si pisa otra tarea, se ofrece próximo hueco o cascada</span>
+                </div>
+              </div>
+              <div className="ap-modal-foot">
+                <button className="ap-btn ap-btn-ghost ap-btn-sm" onClick={() => setDetailTask(null)}>Cerrar</button>
+                <button
+                  className="ap-btn ap-btn-danger ap-btn-sm"
+                  disabled={Boolean(actionBusy)}
+                  onClick={() => { const t = detailTask; setDetailTask(null); cancelTask(t); }}
+                >
+                  Cancelar tarea
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Fase 2: la API rechazó el movimiento por solape (409 + next_free_slot). */}
       {slotConflict && (
