@@ -171,8 +171,8 @@ interface Invite {
 
 const PLATFORMS: Array<{ id: Platform; label: string; short: string; color: string }> = [
   { id: "instagram", label: "Instagram", short: "IG", color: "#f472b6" },
-  { id: "tiktok", label: "TikTok", short: "TT", color: "#67e8f9" },
   { id: "youtube", label: "YouTube Shorts", short: "YT", color: "#fb7185" },
+  { id: "tiktok", label: "TikTok", short: "TT", color: "#67e8f9" },
 ];
 
 const PAGES: Array<{ id: Page; label: string; glyph: ReactNode }> = [
