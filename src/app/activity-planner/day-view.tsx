@@ -214,7 +214,15 @@ function TaskBlock({ task, canManage, actionBusy, onCancel, onDragStart, onDragE
       }}
     >
       <div className="ap-task-time">
-        <strong>{formatBATime(task.scheduledFor)}</strong>
+        <strong>
+          {formatBATime(task.scheduledFor)}
+          {/* Fin aproximado = inicio + duración planificada. */}
+          {task.durationMin != null && task.durationMin > 0 && (
+            <span className="ap-task-end">
+              {" → "}{formatBATime(new Date(Date.parse(task.scheduledFor || "") + task.durationMin * 60e3).toISOString())}
+            </span>
+          )}
+        </strong>
         <small>{task.taskType}{task.source === "manual" ? " · manual" : ""}</small>
       </div>
       <div className="ap-task-icon">{TASK_ICONS[kind]}</div>
