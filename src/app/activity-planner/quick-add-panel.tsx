@@ -50,7 +50,6 @@ export default function QuickAddPanel({ token, clusterId, clusterName, accounts,
   const [conflictMode, setConflictMode] = useState<"auto" | "exacto">("auto");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [summary, setSummary] = useState<string[]>([]);
 
   const deviceByAccountId = useMemo(() => {
     const map = new Map<number, number>();
@@ -78,7 +77,6 @@ export default function QuickAddPanel({ token, clusterId, clusterName, accounts,
 
   const submit = async () => {
     setError("");
-    setSummary([]);
     if (!selectedIds.length) { setError("Elegí al menos una cuenta."); return; }
     if (!/^\d{2}:\d{2}$/.test(time)) { setError("Horario inválido."); return; }
     const targetIso = new Date(`${date}T${time}:00-03:00`).toISOString();
@@ -90,14 +88,17 @@ export default function QuickAddPanel({ token, clusterId, clusterName, accounts,
         const deviceId = deviceByAccountId.get(Number(account.id));
         if (!deviceId) { failures.push(`${account.username}: sin teléfono asignado`); continue; }
         try {
+          const minutes = actionType === "scan" ? 10 : durationMin;
           const created = await plannerApi.createTask(token, {
             task_type: taskTypeFor(account.platform),
             device_id: deviceId,
             cluster_id: clusterId,
             scheduled_for: targetIso,
-            duration_minutes: actionType === "scan" ? 10 : durationMin,
+            duration_minutes: minutes,
             social_account_id: Number(account.id),
-            params: { account: account.username, platform: account.platform },
+            // La duración va en params: el backend deriva de acá el
+            // planned_duration_sec que muestra la tarjeta ("XX min").
+            params: { account: account.username, platform: account.platform, duration_minutes: minutes },
           });
           let effective = created?.scheduled_for_effective || targetIso;
           if (conflictMode === "exacto") {
@@ -112,9 +113,13 @@ export default function QuickAddPanel({ token, clusterId, clusterName, accounts,
           failures.push(`${account.username}: ${apiError.message}`);
         }
       }
-      setSummary(lines);
       if (failures.length) setError(failures.join(" · "));
-      if (lines.length) onChanged();
+      if (lines.length) {
+        // La confirmación visual es el propio timeline refrescándose: se
+        // limpia la selección para que no quede un indicador viejo confundiendo.
+        setSelectedIds([]);
+        onChanged();
+      }
     } finally {
       setBusy(false);
     }
@@ -195,9 +200,17 @@ export default function QuickAddPanel({ token, clusterId, clusterName, accounts,
         </div>
 
         {error && <div className="cc-alert cc-alert-error"><span>{error}<button onClick={() => setError("")}>×</button></span></div>}
-        {summary.length > 0 && (
-          <div className="ap-qa-summary" role="status">
-            {summary.map((line) => <span key={line}>✓ {line}</span>)}
+        {/* Vista previa viva: solo con cuenta+acción+horario elegidos, y
+            desaparece al agregar (la selección se limpia). */}
+        {!busy && selectedIds.length > 0 && /^\d{2}:\d{2}$/.test(time) && (
+          <div className="ap-qa-preview" role="status">
+            {usableAccounts
+              .filter((account) => selectedIds.includes(account.id))
+              .map((account) => (
+                <span key={account.id}>
+                  @{account.username} → {time}
+                </span>
+              ))}
           </div>
         )}
 
