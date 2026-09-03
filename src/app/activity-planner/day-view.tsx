@@ -30,8 +30,9 @@ const HOURS = Array.from({ length: 24 }, (_, i) => i);
 const WINDOW_START_MIN = 0;
 const WINDOW_END_MIN = 24 * 60;
 /** Fase 2.5-visual: el timeline se posiciona ABSOLUTAMENTE por minuto.
-    2 px por minuto ⇒ cada hora mide 120 px, los casilleros de 5' miden 10 px. */
-export const PX_PER_MIN = 2;
+    3 px por minuto ⇒ cada hora mide 180 px; un scan de 10' (30 px) convive
+    con el alto mínimo de tarjeta sin invadir el turno siguiente. */
+export const PX_PER_MIN = 3;
 const TRACK_TOTAL_MIN = WINDOW_END_MIN - WINDOW_START_MIN;
 const TRACK_HEIGHT_PX = TRACK_TOTAL_MIN * PX_PER_MIN;
 /** Snap del drop: cada 5 minutos (los "casilleros"). */
@@ -132,32 +133,36 @@ interface LaidOutTask {
 }
 
 /**
- * Layout por carriles para tareas ABSOLUTAS: la esquina SUPERIOR de cada
- * tarjeta se apoya en su minuto de inicio sobre la regla; las que se enciman
- * en el tiempo (teléfonos distintos) comparten el ancho en columnas.
+ * CARRILES FIJOS POR TELÉFONO (swimlanes): cada dispositivo ocupa su columna
+ * durante todo el día. En "Día completo" los teléfonos se ven lado a lado sin
+ * aplastarse (antes, un solo momento con 2 tareas simultáneas partía TODO el
+ * día en dos columnas angostas); en el día de un clúster queda ancho completo.
  */
 function layOutTasks(tasks: DayTask[]): LaidOutTask[] {
   const items = tasks
     .map((task) => ({
       task,
       startMin: baMinutesOf(task.scheduledFor || ""),
-      durMin: Math.max(15, Number(task.durationMin) || 45),
+      durMin: Math.max(10, Number(task.durationMin) || 45),
     }))
     .filter((item) => item.startMin >= WINDOW_START_MIN && item.startMin < WINDOW_END_MIN)
-    .sort((a, b) => a.startMin - b.startMin || b.durMin - a.durMin);
-  const laneEnds: number[] = [];
-  const assignments: number[] = [];
+    .sort((a, b) => a.startMin - b.startMin);
+  const deviceKeys: string[] = [];
   for (const item of items) {
-    let lane = laneEnds.findIndex((end) => end <= item.startMin);
-    if (lane === -1) {
-      lane = laneEnds.length;
-      laneEnds.push(0);
-    }
-    laneEnds[lane] = item.startMin + item.durMin;
-    assignments.push(lane);
+    const key = item.task.deviceAlias || "?";
+    if (!deviceKeys.includes(key)) deviceKeys.push(key);
   }
-  const totalLanes = Math.max(1, laneEnds.length);
-  return items.map((item, index) => ({ ...item, lane: assignments[index], lanes: totalLanes }));
+  // Aliases numéricos primero y en orden (02 < 07 < 08 < 09), luego alfabético.
+  deviceKeys.sort((a, b) => {
+    const na = Number(a); const nb = Number(b);
+    if (Number.isFinite(na) && Number.isFinite(nb)) return na - nb;
+    return a.localeCompare(b);
+  });
+  return items.map((item) => ({
+    ...item,
+    lane: deviceKeys.indexOf(item.task.deviceAlias || "?"),
+    lanes: Math.max(1, deviceKeys.length),
+  }));
 }
 
 interface TaskBlockProps {
