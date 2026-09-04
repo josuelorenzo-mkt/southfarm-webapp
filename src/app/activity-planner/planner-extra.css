@@ -1018,10 +1018,6 @@
 
 /* ═══ Vista compacta "Día completo" — carril por hora, tarjetas apiladas ═══ */
 .ap-planner .ap-cgrid { position: relative; padding-left: 70px; }
-.ap-planner .ap-cgrid::before {
-  content: ""; position: absolute; left: 62px; top: 0; bottom: 0;
-  width: 1px; background: rgba(255, 255, 255, .14);
-}
 .ap-planner .ap-c-hour {
   position: absolute; left: 4px; width: 54px;
   transform: translateY(-50%);
@@ -1035,9 +1031,9 @@
   background: rgba(9, 9, 11, .94);
   box-shadow: 0 0 12px rgba(34, 197, 94, .18);
 }
-.ap-planner .ap-c-row { position: absolute; left: 0; right: 0; border-top: 1px solid rgba(255, 255, 255, .055); }
+.ap-planner .ap-c-row { position: absolute; left: 70px; right: 0; border-top: 1px solid rgba(255, 255, 255, .055); }
 .ap-planner .ap-c-nowrow {
-  position: absolute; left: 0; right: 0;
+  position: absolute; left: 70px; right: 0;
   background: rgba(134, 239, 172, .06);
   border-top: 1px solid rgba(134, 239, 172, .28);
   border-bottom: 1px solid rgba(134, 239, 172, .28);
@@ -1124,7 +1120,12 @@
 }
 /* Pill del AHORA dentro de la grilla compacta: gutter izquierdo. */
 /* Pill del AHORA dentro de la grilla compacta: gutter izquierdo. */
-.ap-planner .ap-cgrid .ap-now-marker { left: 64px; right: 6px; }
+/* Línea vertical del eje: vive SOLO en el gutter — jamás cruza tarjetas. */
+.ap-planner .ap-cgrid .ap-axis-line {
+  position: absolute; left: 62px; top: 0; bottom: 0;
+  width: 1px; background: rgba(255, 255, 255, .14);
+}
+.ap-planner .ap-cgrid .ap-now-marker { left: 70px; right: 6px; }
 
 /* Modal de detalle */
 .ap-planner .ap-detail-row { display: flex; gap: 10px; padding: 4px 0; font-size: 12.5px; }

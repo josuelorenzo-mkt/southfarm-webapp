@@ -711,6 +711,7 @@ export default function DayView({ token, date, day, canManage, clusterId = null,
             </div>
             ) : (
             <div className="ap-cgrid" style={{ height: 24 * COMPACT_ROW_H }}>
+              <i className="ap-axis-line" aria-hidden="true" />
               <div className="ap-c-nowrow" style={{ top: baHourOf(nowIso) * COMPACT_ROW_H, height: COMPACT_ROW_H }} />
               {HOURS.map((hour) => (
                 <span
