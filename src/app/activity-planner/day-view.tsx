@@ -34,7 +34,7 @@ const WINDOW_END_MIN = 24 * 60;
     con el alto mínimo de tarjeta sin invadir el turno siguiente. */
 export const PX_PER_MIN = 3;
 /** Vista compacta "Día completo": alto fijo de cada carril-hora. */
-const COMPACT_ROW_H = 76;
+const COMPACT_ROW_H = 152;
 const KIND_LABEL: Record<"warmup" | "scan" | "publish", string> = {
   warmup: "Warmup", scan: "Scan", publish: "Post",
 };
@@ -729,22 +729,28 @@ export default function DayView({ token, date, day, canManage, clusterId = null,
                       const endIso = task.durationMin != null && task.durationMin > 0
                         ? new Date(Date.parse(task.scheduledFor || "") + task.durationMin * 60e3).toISOString()
                         : null;
+                      const isRunning = task.status === "running";
                       return (
                         <button
                           key={task.id}
                           type="button"
-                          className={`ap-mini k-${kind} ${task.status === "running" ? "is-running" : ""} ${task.status === "completed" ? "is-done" : ""} ${["overdue", "expired"].includes(task.status) ? "is-late" : ""}`}
-                          style={{ borderLeftColor: deviceColor(task.deviceAlias || null) }}
+                          className={`ap-mini k-${kind} ${isRunning ? "is-running" : ""} ${task.status === "completed" ? "is-done" : ""} ${["overdue", "expired"].includes(task.status) ? "is-late" : ""}`}
+                          style={{ borderLeftColor: isRunning ? "#4ade80" : deviceColor(task.deviceAlias || null) }}
                           onClick={() => { setDetailTask(task); setDetailMoveTime(formatBATime(task.scheduledFor || "")); }}
                         >
                           <span className="ap-mini-top">
-                            <span className="ap-mini-kind">{TASK_ICONS[kind]}{KIND_LABEL[kind]}</span>
+                            <span className="ap-mini-kind">
+                              {isRunning && <i className="ap-mini-live" />}
+                              {TASK_ICONS[kind]}{KIND_LABEL[kind]}
+                            </span>
                             <span className="ap-mini-dev">{task.deviceAlias || "—"}</span>
                           </span>
-                          <strong className="ap-mini-time">
-                            {formatBATime(task.scheduledFor || "")}{endIso ? ` → ${formatBATime(endIso)}` : ""}
-                          </strong>
-                          <span className="ap-mini-user">@{task.username || "—"}{task.clusterName ? ` · ${task.clusterName}` : ""}</span>
+                          <div className="ap-mini-time">
+                            <strong>{formatBATime(task.scheduledFor || "")}</strong>
+                            {endIso && <span className="ap-mini-end">→ {formatBATime(endIso)}</span>}
+                          </div>
+                          <span className="ap-mini-user">@{task.username || "—"}</span>
+                          <span className="ap-mini-cluster">{task.clusterName || " "}</span>
                         </button>
                       );
                     })}
