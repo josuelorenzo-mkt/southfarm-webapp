@@ -669,7 +669,7 @@
    con chip arriba. Vive dentro de .ap-timeline (position: relative)
    y se posiciona por JS con top en porcentaje de la ventana 12:00–22:00. */
 .ap-planner .ap-now-marker {
-  position: absolute; left: 0; right: 4px; z-index: 6;
+  position: absolute; left: 53px; right: 4px; z-index: 6;
   pointer-events: none;
 }
 .ap-planner .ap-now-marker::before {
@@ -683,20 +683,22 @@
 /* Los puntos "caminan" de izquierda a derecha. */
 @keyframes apNowMarch { to { background-position: 16px 0; } }
 .ap-planner .ap-now-marker .ap-now-flag {
-  position: absolute; right: calc(100% + 2px); top: -30px;
+  position: absolute; right: 6px; top: -26px;
+  transform: none;
   color: #86efac; font-size: 8px; font-weight: 900;
   letter-spacing: 0.16em;
   text-shadow: 0 1px 6px rgba(0, 0, 0, 0.9);
   white-space: nowrap;
 }
 .ap-planner .ap-now-marker .ap-now-time {
-  position: absolute; right: calc(100% + 2px); top: -12px;
+  position: absolute; right: 6px; top: 0;
+  transform: translateY(-50%);
   display: inline-flex; align-items: center; justify-content: center;
-  min-width: 56px; padding: 3px 8px;
+  min-width: 58px; padding: 3px 9px;
   color: #bbf7d0; font-size: 11px; font-weight: 800;
   font-variant-numeric: tabular-nums; letter-spacing: 0.04em;
   border: 1px solid rgba(134, 239, 172, 0.55); border-radius: 99px;
-  background: rgba(9, 9, 11, 0.92);
+  background: rgba(9, 9, 11, 0.94);
   backdrop-filter: blur(8px);
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5), 0 0 14px rgba(34, 197, 94, 0.18);
   white-space: nowrap;
@@ -1125,7 +1127,7 @@
   position: absolute; left: 62px; top: 0; bottom: 0;
   width: 1px; background: rgba(255, 255, 255, .14);
 }
-.ap-planner .ap-cgrid .ap-now-marker { left: 70px; right: 6px; }
+.ap-planner .ap-cgrid .ap-now-marker { left: 62px; right: 6px; }
 
 /* Modal de detalle */
 .ap-planner .ap-detail-row { display: flex; gap: 10px; padding: 4px 0; font-size: 12.5px; }
