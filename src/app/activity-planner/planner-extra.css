@@ -682,19 +682,23 @@
 }
 /* Los puntos "caminan" de izquierda a derecha. */
 @keyframes apNowMarch { to { background-position: 16px 0; } }
-.ap-planner .ap-now-marker .ap-now-flag {
-  position: absolute; right: 6px; top: -26px;
-  transform: none;
-  color: #86efac; font-size: 8px; font-weight: 900;
-  letter-spacing: 0.16em;
-  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.9);
+/* El pill AHORA vive en el CARRIL VERTICAL (donde los chips de hora),
+   centrado exactamente en el minuto actual. */
+.ap-planner .ap-now-axis {
+  position: absolute; left: 4px; width: 56px;
+  transform: translateY(-50%);
+  display: flex; flex-direction: column; align-items: center; gap: 2px;
+  z-index: 8; pointer-events: none;
+}
+.ap-planner .ap-now-axis .ap-now-flag {
+  font-size: 8px; font-weight: 900; letter-spacing: 0.18em;
+  color: #86efac;
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.95);
   white-space: nowrap;
 }
-.ap-planner .ap-now-marker .ap-now-time {
-  position: absolute; right: 6px; top: 0;
-  transform: translateY(-50%);
+.ap-planner .ap-now-axis .ap-now-time {
   display: inline-flex; align-items: center; justify-content: center;
-  min-width: 58px; padding: 3px 9px;
+  width: 100%; padding: 3px 0;
   color: #bbf7d0; font-size: 11px; font-weight: 800;
   font-variant-numeric: tabular-nums; letter-spacing: 0.04em;
   border: 1px solid rgba(134, 239, 172, 0.55); border-radius: 99px;

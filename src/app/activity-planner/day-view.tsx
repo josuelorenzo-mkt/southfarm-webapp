@@ -703,6 +703,10 @@ export default function DayView({ token, date, day, canManage, clusterId = null,
                 style={{ top: `${Math.min(TRACK_HEIGHT_PX, nowMarkerPxValue) - 1}px` }}
                 role="status"
                 aria-label={`Ahora: ${baTimeOfMinutes(baMinutesOf(nowIso))} Buenos Aires`}
+              />
+              <div
+                className="ap-now-axis"
+                style={{ top: `${Math.min(TRACK_HEIGHT_PX, nowMarkerPxValue)}px` }}
               >
                 <span className="ap-now-flag">AHORA</span>
                 <span className="ap-now-time">{baTimeOfMinutes(baMinutesOf(nowIso))}</span>
@@ -763,6 +767,10 @@ export default function DayView({ token, date, day, canManage, clusterId = null,
                 style={{ top: `${(baMinutesOf(nowIso) / 60) * COMPACT_ROW_H - 1}px` }}
                 role="status"
                 aria-label={`Ahora: ${baTimeOfMinutes(baMinutesOf(nowIso))} Buenos Aires`}
+              />
+              <div
+                className="ap-now-axis"
+                style={{ top: `${(baMinutesOf(nowIso) / 60) * COMPACT_ROW_H}px` }}
               >
                 <span className="ap-now-flag">AHORA</span>
                 <span className="ap-now-time">{baTimeOfMinutes(baMinutesOf(nowIso))}</span>
