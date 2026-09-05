@@ -1147,3 +1147,8 @@
   margin-top: 10px; padding-top: 10px;
   border-top: 1px solid rgba(255, 255, 255, .1);
 }
+
+/* Logos de redes en las tarjetas */
+.ap-planner .ap-mini-left { display: inline-flex; align-items: center; gap: 5px; min-width: 0; }
+.ap-planner .ap-pill svg { margin-right: 3px; }
+.ap-planner .ap-detail-row dd svg:first-child { margin-right: 5px; }

@@ -23,6 +23,7 @@ import {
   shortDate,
 } from "./types";
 import QuickAddPanel from "./quick-add-panel";
+import { PlatformLogo } from "./platform-logos";
 import type { ClusterAccount, DayResponse, DayTask, PlannerTaskType } from "./types";
 
 /** Día COMPLETO: 24 horas (00:00–24:00 BA) con scroll — sin ventana recortada. */
@@ -239,7 +240,7 @@ function TaskBlock({ task, canManage, actionBusy, onCancel, onDragStart, onDragE
       <div className="ap-task-main">
         <div>
           <strong>{taskName(task)}</strong>
-          {platform && <span className={`ap-pill ap-pill-${task.platform}`} style={{ marginLeft: 2 }}>{platform.short}</span>}
+          {platform && <span className={`ap-pill ap-pill-${task.platform}`} style={{ marginLeft: 2 }}><PlatformLogo platform={task.platform} size={12} />{platform.short}</span>}
           {task.status === "running" && <span className="ap-badge ap-badge-live" style={{ marginLeft: 2 }}><span className="ap-badge-dot" />Ejecutando</span>}
         </div>
         <span>
@@ -744,9 +745,12 @@ export default function DayView({ token, date, day, canManage, clusterId = null,
                           onClick={() => { setDetailTask(task); setDetailMoveTime(formatBATime(task.scheduledFor || "")); }}
                         >
                           <span className="ap-mini-top">
-                            <span className="ap-mini-kind">
-                              {isRunning && <i className="ap-mini-live" />}
-                              {TASK_ICONS[kind]}{KIND_LABEL[kind]}
+                            <span className="ap-mini-left">
+                              <PlatformLogo platform={task.platform} size={16} brand />
+                              <span className="ap-mini-kind">
+                                {isRunning && <i className="ap-mini-live" />}
+                                {TASK_ICONS[kind]}{KIND_LABEL[kind]}
+                              </span>
                             </span>
                             <span className="ap-mini-dev">{task.deviceAlias || "—"}</span>
                           </span>
@@ -933,7 +937,7 @@ export default function DayView({ token, date, day, canManage, clusterId = null,
                     <span className="ap-badge-dot" />{STATUS_LABELS[detailTask.status] || detailTask.status}
                   </span>
                 </dd></div>
-                <div className="ap-detail-row"><dt>Tipo</dt><dd>{TASK_ICONS[kind]} {KIND_LABEL[kind]} · {detailTask.platform ? (PLATFORM_META[detailTask.platform]?.short || detailTask.platform) : ""}</dd></div>
+                <div className="ap-detail-row"><dt>Tipo</dt><dd><PlatformLogo platform={detailTask.platform} size={15} brand />{TASK_ICONS[kind]} {KIND_LABEL[kind]} · {detailTask.platform ? (PLATFORM_META[detailTask.platform]?.short || detailTask.platform) : ""}</dd></div>
                 <div className="ap-detail-row"><dt>Cuenta</dt><dd>@{detailTask.username || "—"}</dd></div>
                 <div className="ap-detail-row"><dt>Teléfono</dt><dd style={{ color: deviceColor(detailTask.deviceAlias || null), fontWeight: 800 }}>{detailTask.deviceAlias || "—"}</dd></div>
                 <div className="ap-detail-row"><dt>Clúster</dt><dd>{detailTask.clusterName || "—"}</dd></div>
