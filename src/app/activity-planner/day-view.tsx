@@ -410,7 +410,11 @@ export default function DayView({ token, date, day, canManage, clusterId = null,
             <div className="ap-cgrid" style={{ height: 24 * COMPACT_ROW_H }}>
               <i className="ap-axis-line" aria-hidden="true" />
               {HOURS.map((hour) => (
-                <span key={hour} className="ap-c-hour" style={{ top: hour * COMPACT_ROW_H }}>
+                <span
+                  key={hour}
+                  className={`ap-c-hour ${hour === 0 ? "is-first" : ""}`}
+                  style={{ top: hour * COMPACT_ROW_H }}
+                >
                   {String(hour).padStart(2, "0")}:00
                 </span>
               ))}
@@ -422,13 +426,22 @@ export default function DayView({ token, date, day, canManage, clusterId = null,
                       const endIso = task.durationMin != null && task.durationMin > 0
                         ? new Date(Date.parse(task.scheduledFor || "") + task.durationMin * 60e3).toISOString()
                         : null;
+                      // Activa = corriendo, o pendiente cuya ventana cubre el
+                      // momento actual (en producción el teléfono la tendría
+                      // reclamada: mismo tratamiento visual).
+                      const startMin = baMinutesOf(task.scheduledFor || "");
+                      const durMin = Math.max(10, Number(task.durationMin) || 45);
+                      const nowMin = baMinutesOf(nowIso);
                       const isRunning = task.status === "running";
+                      const isActive = isRunning
+                        || (["pending", "overdue"].includes(task.status)
+                          && startMin <= nowMin && nowMin < startMin + durMin);
                       return (
                         <button
                           key={task.id}
                           type="button"
-                          className={`ap-mini k-${kind} ${isRunning ? "is-running" : ""} ${task.status === "completed" ? "is-done" : ""} ${["overdue", "expired"].includes(task.status) ? "is-late" : ""}`}
-                          style={{ borderLeftColor: isRunning ? "#4ade80" : deviceColor(task.deviceAlias || null) }}
+                          className={`ap-mini k-${kind} ${isActive ? "is-running" : ""} ${task.status === "completed" ? "is-done" : ""} ${["overdue", "expired"].includes(task.status) ? "is-late" : ""}`}
+                          style={{ borderLeftColor: isActive ? "#4ade80" : deviceColor(task.deviceAlias || null) }}
                           onClick={() => { setDetailTask(task); setDetailMoveTime(formatBATime(task.scheduledFor || "")); }}
                         >
                           <span className="ap-mini-top">

@@ -1432,3 +1432,9 @@
 .ap-planner .ap-mini-left { display: inline-flex; align-items: center; gap: 5px; min-width: 0; }
 .ap-planner .ap-pill svg { margin-right: 3px; }
 .ap-planner .ap-detail-row dd svg:first-child { margin-right: 5px; }
+
+/* El chip 00:00 no se centra sobre el borde: se apoya debajo (evita recorte). */
+.ap-planner .ap-c-hour.is-first { transform: none; top: 3px; }
+
+/* El chip 00:00 se apoya debajo de su línea (evita recorte con el borde). */
+.ap-planner .ap-c-hour.is-first { transform: none; top: 3px; }
