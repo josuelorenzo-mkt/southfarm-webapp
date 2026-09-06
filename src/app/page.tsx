@@ -186,7 +186,11 @@ const PAGES: Array<{ id: Page; label: string; glyph: ReactNode }> = [
       <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="3.5" y="4.5" width="17" height="16" rx="2.5" /><path d="M3.5 9.5h17M8 3v3M16 3v3" /><path d="m9 15 2 2 4-4.5" /></svg>
     ),
   },
-  { id: "accounts", label: "Warmup planner", glyph: "◎" },
+  // "Warmup planner" queda FUERA de la navegación (decisión del dueño,
+  // sep-2026): Activity Planner lo suplanta y la sección se removerá por
+  // completo más adelante. La vista "accounts" sigue existiendo mientras
+  // tanto (la alcanza el link "Cuentas →" del Command center).
+  // { id: "accounts", label: "Warmup planner", glyph: "◎" },
   { id: "history", label: "Activity history", glyph: "◷" },
   { id: "team", label: "Team & roles", glyph: "♙" },
   { id: "settings", label: "Settings", glyph: "⚙" },
@@ -524,15 +528,23 @@ function TaskLauncher({ device, accounts, activeRun, token, onChanged, canRunTas
   };
 
   const launch = async () => {
-    if (mode === "warmup" && !selectedAccount.trim()) { setMessage("No hay una cuenta escaneada para esta plataforma en este dispositivo."); return; }
+    if (mode === "warmup" && !selectedAccount.trim()) { setMessage("No hay una cuenta scaneada para esta plataforma en este dispositivo."); return; }
     setBusy(true);
     setMessage("");
     try {
       const taskType = mode === "warmup" ? warmupTaskType(platform) : scanTaskType(platform);
       const params = mode === "warmup" ? { platform, account: selectedAccount.trim().replace(/^@+/, ""), duration_minutes: Number(duration) } : { platform };
-      await request("/api/tasks/run", token, { method: "POST", body: JSON.stringify({ device_id: device.id, task_type: taskType, params }) });
+      // El sistema de reservas puede correr la tarea al próximo hueco del
+      // teléfono (shifted + scheduled_for_effective): si corrió, el usuario
+      // tiene que ver a qué hora arranca de verdad — no solo "Comando enviado".
+      const created = await request<{ scheduled_for_effective?: string; shifted?: boolean }>("/api/tasks/run", token, { method: "POST", body: JSON.stringify({ device_id: device.id, task_type: taskType, params }) });
       setOpen(false);
-      setMessage("Comando enviado");
+      const effective = created?.scheduled_for_effective;
+      if (created?.shifted && effective) {
+        setMessage(`Comando enviado · inicia ${new Intl.DateTimeFormat("es-AR", { timeZone: "America/Argentina/Buenos_Aires", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(new Date(effective))} (el teléfono estaba ocupado)`);
+      } else {
+        setMessage("Comando enviado");
+      }
       onChanged();
     } catch (cause) {
       setMessage(cause instanceof Error ? cause.message : "No se pudo enviar el comando");
