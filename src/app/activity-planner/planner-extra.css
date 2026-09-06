@@ -668,18 +668,6 @@
 /* Línea de AHORA: vertical punteada a la altura de la hora actual,
    con chip arriba. Vive dentro de .ap-timeline (position: relative)
    y se posiciona por JS con top en porcentaje de la ventana 12:00–22:00. */
-.ap-planner .ap-now-marker {
-  position: absolute; left: 53px; right: 4px; z-index: 6;
-  pointer-events: none;
-}
-.ap-planner .ap-now-marker::before {
-  content: ""; position: absolute; left: 0; right: 0; top: 0; height: 2px;
-  background: repeating-linear-gradient(to right,
-    rgba(134, 239, 172, 0.9) 0 8px,
-    rgba(134, 239, 172, 0) 8px 16px);
-  filter: drop-shadow(0 0 6px rgba(34, 197, 94, 0.35));
-  animation: apNowMarch 0.9s linear infinite;
-}
 /* Los puntos "caminan" de izquierda a derecha. */
 @keyframes apNowMarch { to { background-position: 16px 0; } }
 /* El pill AHORA vive en el CARRIL VERTICAL (donde los chips de hora),
@@ -709,23 +697,7 @@
 }
 /* fuera de la ventana 12:00–22:00: clamp atenuado (línea punteada gris) */
 /* fuera de la ventana 12:00–22:00: clamp atenuado (puntos grises) */
-.ap-planner .ap-now-marker.is-out-of-range { opacity: 0.55; }
-.ap-planner .ap-now-marker.is-out-of-range::before {
-  background: repeating-linear-gradient(to right,
-    rgba(255, 255, 255, 0.35) 0 6px,
-    rgba(255, 255, 255, 0) 6px 14px);
-  filter: none;
-  animation-duration: 1.6s;
-}
-.ap-planner .ap-now-marker.is-out-of-range span {
-  color: var(--text-secondary);
-  border-color: var(--border-default);
-  background: rgba(9, 9, 11, 0.6);
-  box-shadow: none;
-}
 
-/* drag & drop individual: la tarea entera es el agarre */
-.ap-planner .ap-task[draggable="true"] { cursor: grab; }
 .ap-planner .ap-task.is-dragging { opacity: 0.45; }
 
 @media (max-width: 760px) {
@@ -733,7 +705,8 @@
   .ap-planner .ap-day-chip { min-width: 42px; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .ap-planner .ap-now-marker::before { animation: none; }
+  .ap-planner .ap-c-nowrow::before,
+  .ap-planner .ap-c-nowrow::after { animation: none; }
 }
 
 /* ============================================================
@@ -1041,10 +1014,21 @@
 .ap-planner .ap-c-nowrow {
   position: absolute; left: 70px; right: 0;
   background: rgba(134, 239, 172, .06);
-  border-top: 1px solid rgba(134, 239, 172, .28);
-  border-bottom: 1px solid rgba(134, 239, 172, .28);
   pointer-events: none; z-index: 1;
 }
+/* Los dos bordes del carril-hora: puntos verdes marchando izquierda→derecha.
+   Se mantienen de :00 a :59 de la hora en curso y saltan con la siguiente. */
+.ap-planner .ap-c-nowrow::before,
+.ap-planner .ap-c-nowrow::after {
+  content: ""; position: absolute; left: 0; right: 0; height: 2px;
+  background: repeating-linear-gradient(to right,
+    rgba(134, 239, 172, 0.9) 0 8px,
+    rgba(134, 239, 172, 0) 8px 16px);
+  filter: drop-shadow(0 0 6px rgba(34, 197, 94, 0.35));
+  animation: apNowMarch 0.9s linear infinite;
+}
+.ap-planner .ap-c-nowrow::before { top: 0; }
+.ap-planner .ap-c-nowrow::after { bottom: 0; }
 .ap-planner .ap-c-lane {
   position: absolute; inset: 8px 12px 10px 10px;
   display: flex; gap: 10px; align-items: stretch;
@@ -1131,7 +1115,6 @@
   position: absolute; left: 62px; top: 0; bottom: 0;
   width: 1px; background: rgba(255, 255, 255, .14);
 }
-.ap-planner .ap-cgrid .ap-now-marker { left: 62px; right: 6px; }
 
 /* Modal de detalle */
 .ap-planner .ap-detail-row { display: flex; gap: 10px; padding: 4px 0; font-size: 12.5px; }

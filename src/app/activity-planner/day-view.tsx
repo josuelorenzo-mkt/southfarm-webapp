@@ -458,12 +458,9 @@ export default function DayView({ token, date, day, canManage, clusterId = null,
                   </div>
                 </div>
               ))}
-              <div
-                className="ap-now-marker"
-                style={{ top: `${(baMinutesOf(nowIso) / 60) * COMPACT_ROW_H - 1}px` }}
-                role="status"
-                aria-label={`Ahora: ${baTimeOfMinutes(baMinutesOf(nowIso))} Buenos Aires`}
-              />
+              {/* El carril de la hora EN CURSO lleva los bordes punteados
+                  animados (marcan 00→59 de esa hora); el pill del gutter
+                  sigue mostrando la hora exacta como reloj. */}
               <div
                 className="ap-now-axis"
                 style={{ top: `${(baMinutesOf(nowIso) / 60) * COMPACT_ROW_H}px` }}
