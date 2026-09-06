@@ -214,8 +214,8 @@ export default function DayView({ token, date, day, canManage, clusterId = null,
     const task = window.setTimeout(() => {
       const timeline = timelineRef.current;
       if (!timeline) return;
-      const px = (baMinutesOf(nowIso) / 60) * COMPACT_ROW_H;
-      timeline.scrollTo({ top: Math.max(0, px - timeline.clientHeight / 3), behavior: "smooth" });
+      const px = baHourOf(nowIso) * COMPACT_ROW_H + COMPACT_ROW_H / 2;
+      timeline.scrollTo({ top: Math.max(0, px - timeline.clientHeight / 2), behavior: "smooth" });
       scrolledToNowRef.current = true;
     }, 0);
     return () => window.clearTimeout(task);
@@ -409,13 +409,8 @@ export default function DayView({ token, date, day, canManage, clusterId = null,
           <div className="ap-timeline-scroll" ref={timelineRef} role="region" aria-label="Agenda del día, scrolleable">
             <div className="ap-cgrid" style={{ height: 24 * COMPACT_ROW_H }}>
               <i className="ap-axis-line" aria-hidden="true" />
-              <div className="ap-c-nowrow" style={{ top: baHourOf(nowIso) * COMPACT_ROW_H, height: COMPACT_ROW_H }} />
               {HOURS.map((hour) => (
-                <span
-                  key={hour}
-                  className={`ap-c-hour ${hour === baHourOf(nowIso) ? "is-now" : ""}`}
-                  style={{ top: hour * COMPACT_ROW_H }}
-                >
+                <span key={hour} className="ap-c-hour" style={{ top: hour * COMPACT_ROW_H }}>
                   {String(hour).padStart(2, "0")}:00
                 </span>
               ))}
@@ -463,7 +458,7 @@ export default function DayView({ token, date, day, canManage, clusterId = null,
                   sigue mostrando la hora exacta como reloj. */}
               <div
                 className="ap-now-axis"
-                style={{ top: `${(baMinutesOf(nowIso) / 60) * COMPACT_ROW_H}px` }}
+                style={{ top: `${baHourOf(nowIso) * COMPACT_ROW_H + COMPACT_ROW_H / 2}px` }}
               >
                 <span className="ap-now-flag">AHORA</span>
                 <span className="ap-now-time">{baTimeOfMinutes(baMinutesOf(nowIso))}</span>
