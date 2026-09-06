@@ -44,6 +44,8 @@
 .ap-btn-muted { color: var(--text-secondary); background: rgba(255, 255, 255, 0.05); }
 .ap-btn-danger { color: #fca5a5; border-color: rgba(239, 68, 68, 0.3); background: var(--error-dim); }
 .ap-btn-sm { min-height: 28px; padding: 0 9px; font-size: 10px; }
+/* Botón de solo ícono (ej. refresh de regenerar semana): cuadrado. */
+.ap-btn-icon { width: 35px; padding: 0; font-size: 15px; }
 .ap-btn:focus-visible, .ap-icon-btn:focus-visible { outline: 2px solid #86efac; outline-offset: 2px; }
 
 .ap-icon-btn {
