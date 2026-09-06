@@ -35,8 +35,8 @@ const FINAL_STATUSES = new Set<PublicationStatus>(["completed", "cancelled", "fa
 
 const PLATFORM_OPTIONS: Array<{ id: PublicationPlatform; label: string; short: string }> = [
   { id: "instagram", label: "Instagram Reels", short: "IG" },
-  { id: "tiktok", label: "TikTok", short: "TT" },
   { id: "youtube", label: "YouTube Shorts", short: "YT" },
+  { id: "tiktok", label: "TikTok", short: "TT" },
 ];
 
 const STATUS_LABELS: Record<PublicationStatus, string> = {

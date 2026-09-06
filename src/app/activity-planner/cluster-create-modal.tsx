@@ -26,7 +26,7 @@ interface ClusterCreateModalProps {
 }
 
 /** Orden de secciones del picker (solo se renderizan las no vacías). */
-const PLATFORM_ORDER: PlannerPlatform[] = ["instagram", "tiktok", "youtube"];
+const PLATFORM_ORDER: PlannerPlatform[] = ["instagram", "youtube", "tiktok"];
 
 export default function ClusterCreateModal({ token, open, onClose, onCreated, occupied, existingNames }: ClusterCreateModalProps) {
   const [accounts, setAccounts] = useState<WorkspaceAccount[]>([]);
@@ -67,7 +67,7 @@ export default function ClusterCreateModal({ token, open, onClose, onCreated, oc
       // PlannerPlatform (mismo fallback "instagram" que el resto del planner).
       const normalized = (accountsRes.accounts ?? []).map((account) => ({
         ...account,
-        platform: (["instagram", "tiktok", "youtube"] as PlannerPlatform[]).includes(account.platform as PlannerPlatform)
+        platform: (["instagram", "youtube", "tiktok"] as PlannerPlatform[]).includes(account.platform as PlannerPlatform)
           ? (account.platform as PlannerPlatform)
           : ("instagram" as PlannerPlatform),
       }));

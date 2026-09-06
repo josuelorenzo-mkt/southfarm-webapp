@@ -140,7 +140,7 @@ afterEach(() => {
 /** Lleva la vista hasta EN VIVO y devuelve el socket usado. */
 async function goLive(alias = "Poco Uno") {
   stubWebCodecs();
-  render(<DeviceLiveView bridgeUrl="http://localhost:8100" deviceAlias={alias} onClose={vi.fn()} />);
+  render(<DeviceLiveView bridgeUrl="http://localhost:8100" deviceAlias={alias} />);
   await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
   const socket = MockWebSocket.instances[0];
   await act(async () => {
@@ -153,7 +153,7 @@ async function goLive(alias = "Poco Uno") {
 }
 
 describe("Vista en vivo de Device Fleet", () => {
-  it('el toggle alterna entre "Ver pantalla" y "Detener" y emite el click', () => {
+  it('el toggle alterna entre "Ver pantalla" y "Ocultar pantalla" y emite el click', () => {
     const onClick = vi.fn();
     const view = render(<LiveViewToggle active={false} onClick={onClick} />);
     const toggle = screen.getByRole("button");
@@ -164,13 +164,13 @@ describe("Vista en vivo de Device Fleet", () => {
     expect(onClick).toHaveBeenCalledTimes(1);
 
     view.rerender(<LiveViewToggle active onClick={onClick} />);
-    expect(screen.getByRole("button").textContent).toContain("Detener");
-    expect(screen.getByRole("button").getAttribute("aria-label")).toBe("Detener vista en vivo");
+    expect(screen.getByRole("button").textContent).toContain("Ocultar pantalla");
+    expect(screen.getByRole("button").getAttribute("aria-label")).toBe("Ocultar vista en vivo");
   });
 
   it("muestra el estado de error cuando el bridge no responde y permite reintentar", async () => {
     fetchMock.mockRejectedValue(new TypeError("Failed to fetch"));
-    render(<DeviceLiveView bridgeUrl="http://localhost:8100" deviceAlias="Poco Uno" onClose={vi.fn()} />);
+    render(<DeviceLiveView bridgeUrl="http://localhost:8100" deviceAlias="Poco Uno" />);
 
     const alert = await screen.findByRole("alert");
     expect(alert.textContent).toContain("Error:");
@@ -180,7 +180,7 @@ describe("Vista en vivo de Device Fleet", () => {
 
   it("sin WebCodecs muestra el error antes de abrir el WebSocket", async () => {
     vi.stubGlobal("VideoDecoder", undefined);
-    render(<DeviceLiveView bridgeUrl="http://localhost:8100" deviceAlias="Poco Uno" onClose={vi.fn()} />);
+    render(<DeviceLiveView bridgeUrl="http://localhost:8100" deviceAlias="Poco Uno" />);
 
     const alert = await screen.findByRole("alert");
     expect(alert.textContent).toContain("WebCodecs");
@@ -190,8 +190,7 @@ describe("Vista en vivo de Device Fleet", () => {
 
   it("resuelve el serial por alias único, configura el decoder y entra en vivo", async () => {
     stubWebCodecs();
-    const onClose = vi.fn();
-    render(<DeviceLiveView bridgeUrl="http://localhost:8100/" deviceAlias="Poco Uno" onClose={onClose} />);
+    const view = render(<DeviceLiveView bridgeUrl="http://localhost:8100/" deviceAlias="Poco Uno" />);
 
     await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
     const socket = MockWebSocket.instances[0];
@@ -214,8 +213,8 @@ describe("Vista en vivo de Device Fleet", () => {
     expect(StubEncodedVideoChunk.created[0]?.type).toBe("key");
     expect(StubVideoFrame.closed).toBeGreaterThan(0);
 
-    fireEvent.click(screen.getByRole("button", { name: "Cerrar vista en vivo" }));
-    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+    // Ocultar la vista desmonta el panel: socket y decoder deben quedar cerrados.
+    view.unmount();
     expect(socket.closed).toBe(true);
     expect(StubVideoDecoder.instances[0].state).toBe("closed");
   });
@@ -227,7 +226,7 @@ describe("Vista en vivo de Device Fleet", () => {
       { serial: "SER-B", alias: "Granja Norte", model: "Moto G", online: true },
       { serial: "SER-C", alias: "Otra finca", model: "Galaxy A", online: false },
     ];
-    render(<DeviceLiveView bridgeUrl="http://localhost:8100" deviceAlias="Granja Norte" onClose={vi.fn()} />);
+    render(<DeviceLiveView bridgeUrl="http://localhost:8100" deviceAlias="Granja Norte" />);
 
     const select = (await screen.findByLabelText("Elegir dispositivo")) as HTMLSelectElement;
     expect(select.value).toBe("");
@@ -247,7 +246,7 @@ describe("Vista en vivo de Device Fleet", () => {
 
   it("la ráfaga inicial del GOP cacheado no dispara descarte ni reset del decoder", async () => {
     stubWebCodecs();
-    render(<DeviceLiveView bridgeUrl="http://localhost:8100" deviceAlias="Poco Uno" onClose={vi.fn()} />);
+    render(<DeviceLiveView bridgeUrl="http://localhost:8100" deviceAlias="Poco Uno" />);
     await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
     const socket = MockWebSocket.instances[0];
     await act(async () => {
