@@ -245,16 +245,15 @@ export default function PlannerPage({ token, canManage }: PlannerPageProps) {
         {/* BARRA DE MANDO — FIJA: primera sección en TODAS las vistas, con
             DOS filas de estructura idéntica (no importa el ancho ni la vista,
             las filas no se reacomodan distinto):
-            fila 1 = estado vivo + navegación de fecha (semana: ‹ rango › +
-            Ver día de hoy / día: ‹ fecha › + Ahora + Volver a la semana);
-            fila 2 = Sincronizar (día) + tabs, siempre en el mismo lugar. */}
+            fila 1 = estado vivo + navegación de fecha, TODO a la izquierda
+            (semana: ‹ rango › + Ver día de hoy / día: ‹ fecha › + Ahora +
+            Volver a la semana);
+            fila 2 = Sincronizar (día) + tabs. */}
         <div className="ap-toolbar">
           <div className="ap-toolbar-row">
             <div className="ap-week-controls">
               <span className="ap-badge ap-badge-live"><span className="ap-badge-dot" />En vivo · {week?.now ? formatBATime(week.now) : "—"} BA</span>
               <span className="ap-last-sync" style={{ color: "var(--text-muted)", fontSize: 11 }}>Actualizado {lastSync ? relativeBA(lastSync) : "…"}</span>
-            </div>
-            <div className="ap-week-controls ap-toolbar-end">
               {view === "week" && (
                 <>
                   <div className="ap-week-range">

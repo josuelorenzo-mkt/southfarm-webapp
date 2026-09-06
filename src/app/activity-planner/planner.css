@@ -282,7 +282,7 @@
    fila (a 1440px la vista de día desbordaba y reacomodaba distinto que la
    de semana), sino que cada fila tenga los mismos elementos en las mismas
    posiciones cualquiera sea la vista:
-   fila 1 = estado vivo (izq) + navegación de fecha (der)
+   fila 1 = estado vivo + navegación de fecha, TODO a la izquierda
    fila 2 = acción contextual (izq) + tabs (der) */
 .ap-toolbar {
   display: flex;
@@ -298,8 +298,8 @@
   flex-wrap: wrap;
   min-height: 36px;
 }
-/* el grupo de la derecha empuja al borde: filas uniformes en todas las vistas */
-.ap-toolbar-end, .ap-toolbar-row > .ap-segmented { margin-left: auto; }
+/* los tabs quedan anclados a la derecha de su fila */
+.ap-toolbar-row > .ap-segmented { margin-left: auto; }
 
 /* El selector de fecha mide lo mismo que los botones/tabs (36px con su borde):
    si midiera más, la fila crece y los elementos vecinos quedan descentrados. */
