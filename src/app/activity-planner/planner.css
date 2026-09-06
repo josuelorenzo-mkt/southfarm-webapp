@@ -276,20 +276,33 @@
 .ap-week-head p:not(.ap-eyebrow) { color: var(--text-secondary); font-size: 13px; }
 .ap-week-controls { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 
-/* Barra de mando fija (planner-page): primera fila de la sección en TODAS
-   las vistas — tabs + selector de fecha no cambian de altura al paginar.
-   El hairline inferior la ancla visualmente como barra permanente y el
-   min-height reserva el alto del caso más alto (día: selector de fecha) —
-   en semana la fila queda igual y los tabs no se mueven un pixel. */
+/* Barra de mando fija (planner-page): primera sección en TODAS las vistas,
+   con DOS filas de estructura idéntica — la clave para que los tabs y el
+   selector de fecha no se muevan al paginar NO es que entre todo en una
+   fila (a 1440px la vista de día desbordaba y reacomodaba distinto que la
+   de semana), sino que cada fila tenga los mismos elementos en las mismas
+   posiciones cualquiera sea la vista:
+   fila 1 = estado vivo (izq) + navegación de fecha (der)
+   fila 2 = acción contextual (izq) + tabs (der) */
 .ap-toolbar {
-  min-height: 40px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
   padding-bottom: 10px;
   border-bottom: 1px solid var(--border-subtle);
 }
+.ap-toolbar-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  min-height: 36px;
+}
+/* el grupo de la derecha empuja al borde: filas uniformes en todas las vistas */
+.ap-toolbar-end, .ap-toolbar-row > .ap-segmented { margin-left: auto; }
 
-/* El selector de fecha de la toolbar mide lo mismo que el segmented (36px):
-   si midiera 40, la fila crece en vistas de día y los tabs quedan 2px más
-   abajo que en semana — exactamente lo que esta barra elimina. */
+/* El selector de fecha mide lo mismo que los botones/tabs (36px con su borde):
+   si midiera más, la fila crece y los elementos vecinos quedan descentrados. */
 .ap-toolbar .ap-week-range { padding: 2px; }
 
 .ap-week-range { display: flex; align-items: center; gap: 4px; padding: 4px; border: 1px solid var(--border-subtle); border-radius: 10px; background: rgba(0, 0, 0, 0.16); }
