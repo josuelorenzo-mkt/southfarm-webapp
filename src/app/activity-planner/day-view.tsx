@@ -10,7 +10,7 @@
  */
 import "./planner-extra.css";
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { CSSProperties, DragEvent as ReactDragEvent, ReactNode } from "react";
+import type { ReactNode } from "react";
 import { plannerApi, PlannerApiError, type CascadeMoveDto } from "./api";
 import {
   BUENOS_AIRES_TIMEZONE,
@@ -28,29 +28,15 @@ import type { ClusterAccount, DayResponse, DayTask, PlannerTaskType } from "./ty
 
 /** Día COMPLETO: 24 horas (00:00–24:00 BA) con scroll — sin ventana recortada. */
 const HOURS = Array.from({ length: 24 }, (_, i) => i);
-const WINDOW_START_MIN = 0;
-const WINDOW_END_MIN = 24 * 60;
 /** Fase 2.5-visual: el timeline se posiciona ABSOLUTAMENTE por minuto.
     3 px por minuto ⇒ cada hora mide 180 px; un scan de 10' (30 px) convive
     con el alto mínimo de tarjeta sin invadir el turno siguiente. */
-export const PX_PER_MIN = 3;
 /** Vista compacta "Día completo": alto fijo de cada carril-hora. */
 const COMPACT_ROW_H = 152;
 const KIND_LABEL: Record<"warmup" | "scan" | "publish", string> = {
   warmup: "Warmup", scan: "Scan", publish: "Post",
 };
-const TRACK_TOTAL_MIN = WINDOW_END_MIN - WINDOW_START_MIN;
-const TRACK_HEIGHT_PX = TRACK_TOTAL_MIN * PX_PER_MIN;
 /** Snap del drop: cada 5 minutos (los "casilleros"). */
-const DROP_SNAP_MIN = 5;
-function minuteToPx(minute: number): number {
-  return (minute - WINDOW_START_MIN) * PX_PER_MIN;
-}
-function formatMinuteOf(dayMinute: number): string {
-  const hour = Math.floor(dayMinute / 60);
-  const minute = dayMinute % 60;
-  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
-}
 const NOW_REFRESH_MS = 30000;
 
 const TASK_ICONS: Record<"warmup" | "scan" | "publish", ReactNode> = {
@@ -126,144 +112,12 @@ function baTimeOfMinutes(minutes: number): string {
  * Posición px del marcador AHORA sobre el track absoluto: matemática directa
  * (minutos transcurridos × escala). Fuera de 12–22 BA devuelve null (oculto).
  */
-function nowMarkerTopPx(nowIso: string): number {
-  return minuteToPx(baMinutesOf(nowIso));
-}
 
-interface LaidOutTask {
-  task: DayTask;
-  startMin: number;
-  durMin: number;
-  lane: number;
-  lanes: number;
-}
-
-/**
- * CARRILES FIJOS POR TELÉFONO (swimlanes): cada dispositivo ocupa su columna
- * durante todo el día. En "Día completo" los teléfonos se ven lado a lado sin
- * aplastarse (antes, un solo momento con 2 tareas simultáneas partía TODO el
- * día en dos columnas angostas); en el día de un clúster queda ancho completo.
- */
-function layOutTasks(tasks: DayTask[]): LaidOutTask[] {
-  const items = tasks
-    .map((task) => ({
-      task,
-      startMin: baMinutesOf(task.scheduledFor || ""),
-      durMin: Math.max(10, Number(task.durationMin) || 45),
-    }))
-    .filter((item) => item.startMin >= WINDOW_START_MIN && item.startMin < WINDOW_END_MIN)
-    .sort((a, b) => a.startMin - b.startMin);
-  const deviceKeys: string[] = [];
-  for (const item of items) {
-    const key = item.task.deviceAlias || "?";
-    if (!deviceKeys.includes(key)) deviceKeys.push(key);
-  }
-  // Aliases numéricos primero y en orden (02 < 07 < 08 < 09), luego alfabético.
-  deviceKeys.sort((a, b) => {
-    const na = Number(a); const nb = Number(b);
-    if (Number.isFinite(na) && Number.isFinite(nb)) return na - nb;
-    return a.localeCompare(b);
-  });
-  return items.map((item) => ({
-    ...item,
-    lane: deviceKeys.indexOf(item.task.deviceAlias || "?"),
-    lanes: Math.max(1, deviceKeys.length),
-  }));
-}
-
-interface TaskBlockProps {
-  task: DayTask;
-  canManage: boolean;
-  actionBusy: string;
-  onCancel: (task: DayTask) => void;
-  onDragStart: (task: DayTask) => void;
-  onDragEnd: () => void;
-  /** Posicionamiento absoluto sobre el track (top = minuto de inicio). */
-  layoutStyle?: React.CSSProperties;
-}
-
-/** Color estable por teléfono: al mirar la franja horaria se distingue de un
-    vistazo si dos tarjetas de la misma hora son de teléfonos DISTINTOS. */
 function deviceColor(alias: string | null | undefined): string {
   if (!alias) return "rgba(255,255,255,.28)";
   let hash = 0;
   for (let i = 0; i < alias.length; i += 1) hash = (hash * 31 + alias.charCodeAt(i)) % 360;
   return `hsl(${hash} 70% 60%)`;
-}
-
-function TaskBlock({ task, canManage, actionBusy, onCancel, onDragStart, onDragEnd, layoutStyle }: TaskBlockProps) {
-  const kind = taskKind(task.taskType);
-  const stateClass = task.status === "running"
-    ? "is-running"
-    : task.status === "completed"
-      ? "is-done"
-      : task.status === "overdue" || task.status === "expired"
-        ? "is-late"
-        : task.status === "error"
-          ? "is-error"
-          : "";
-  const platform = task.platform ? (PLATFORM_META[task.platform] || PLATFORM_META.instagram) : null;
-  const editable = ["pending", "overdue", "paused", "expired"].includes(task.status);
-
-  return (
-    <div
-      className={`ap-task t-${kind} ${stateClass}`}
-      style={{ ...layoutStyle, borderLeft: `3px solid ${deviceColor(task.deviceAlias || null)}` }}
-      data-type={kind}
-      data-status={task.status}
-      title={task.deviceAlias ? `Teléfono ${task.deviceAlias}` : undefined}
-      draggable={canManage && editable && !actionBusy}
-      onDragStart={(event) => {
-        onDragStart(task);
-        event.currentTarget.classList.add("is-dragging");
-        event.dataTransfer.effectAllowed = "move";
-        try { event.dataTransfer.setData("text/plain", String(task.id)); } catch { /* IE/edge quirks */ }
-      }}
-      onDragEnd={(event) => {
-        event.currentTarget.classList.remove("is-dragging");
-        onDragEnd();
-      }}
-    >
-      <div className="ap-task-time">
-        <strong>
-          {formatBATime(task.scheduledFor)}
-          {/* Fin aproximado = inicio + duración planificada. */}
-          {task.durationMin != null && task.durationMin > 0 && (
-            <span className="ap-task-end">
-              {" → "}{formatBATime(new Date(Date.parse(task.scheduledFor || "") + task.durationMin * 60e3).toISOString())}
-            </span>
-          )}
-        </strong>
-        <small>{task.taskType}{task.source === "manual" ? " · manual" : ""}</small>
-      </div>
-      <div className="ap-task-icon">{TASK_ICONS[kind]}</div>
-      <div className="ap-task-main">
-        <div>
-          <strong>{taskName(task)}</strong>
-          {platform && <span className={`ap-pill ap-pill-${task.platform}`} style={{ marginLeft: 2 }}><PlatformLogo platform={task.platform} size={12} />{platform.short}</span>}
-          {task.status === "running" && <span className="ap-badge ap-badge-live" style={{ marginLeft: 2 }}><span className="ap-badge-dot" />Ejecutando</span>}
-        </div>
-        <span>
-          {task.clusterName || `Cluster #${task.clusterId ?? "—"}`}
-          {task.username ? <> · <b>@{task.username}</b></> : null}
-          {task.deviceAlias ? <> · celular <b>{task.deviceAlias}</b></> : null}
-          {task.durationMin != null ? <> · {task.durationMin} min</> : null}
-        </span>
-      </div>
-      <div className="ap-task-right">
-        {task.status !== "running" && (
-          <span className={`ap-badge ${task.status === "completed" ? "ap-badge-live" : task.status === "overdue" || task.status === "expired" ? "ap-badge-warn" : task.status === "error" ? "ap-badge-bad" : "ap-badge-neutral"}`}>
-            <span className="ap-badge-dot" />{STATUS_LABELS[task.status] || task.status}
-          </span>
-        )}
-        {canManage && editable && (
-          <div className="ap-task-actions">
-            <button className="ap-btn ap-btn-danger ap-btn-sm" disabled={Boolean(actionBusy)} onClick={() => onCancel(task)}>Cancelar</button>
-          </div>
-        )}
-      </div>
-    </div>
-  );
 }
 
 interface DayViewProps {
@@ -294,12 +148,6 @@ export default function DayView({ token, date, day, canManage, clusterId = null,
   });
   const [actionBusy, setActionBusy] = useState("");
   const [error, setError] = useState("");
-  /** D1/Fase 2.5-visual: tarea arrastrada y casillero (cada 5') bajo el cursor. */
-  const [dragSource, setDragSource] = useState<DayTask | null>(null);
-  const [dragSnapMin, setDragSnapMin] = useState<number | null>(null);
-  const [confirmTarget, setConfirmTarget] = useState<{ task: DayTask; minute: number } | null>(null);
-  /** Fase 2: hora elegida en el modal de movimiento ("HH:MM", default la del drop). */
-  const [moveTime, setMoveTime] = useState("12:00");
   /** Fase 2: choque de agenda al mover — la API devuelve 409 + próximo hueco libre. */
   const [slotConflict, setSlotConflict] = useState<{ task: DayTask; nextFreeSlot: string; requestedFor: string } | null>(null);
   /** Fase 2.5: plan de cascada calculado, esperando confirmación del usuario. */
@@ -307,7 +155,6 @@ export default function DayView({ token, date, day, canManage, clusterId = null,
   /** AHORA: timestamp actualizado cada 30 s (para el indicador del timeline). */
   const [nowIso, setNowIso] = useState<string>(() => new Date().toISOString());
   const timelineRef = useRef<HTMLDivElement | null>(null);
-  const trackRef = useRef<HTMLDivElement | null>(null);
   const scrolledToNowRef = useRef(false);
   /** Vista compacta (día completo): tarea expandida en modal. */
   const [detailTask, setDetailTask] = useState<DayTask | null>(null);
@@ -337,7 +184,6 @@ export default function DayView({ token, date, day, canManage, clusterId = null,
     }), [day.tasks, filters]);
 
   /** Layout absoluto con carriles para encimadas entre teléfonos distintos. */
-  const laidOutTasks = useMemo(() => layOutTasks(visibleTasks), [visibleTasks]);
 
   /** Vista compacta: tareas agrupadas por hora, ordenadas por minuto. */
   const compactByHour = useMemo(() => {
@@ -361,7 +207,6 @@ export default function DayView({ token, date, day, canManage, clusterId = null,
   const late = day.tasks.filter((task) => task.status === "overdue" || task.status === "expired");
 
   /* Marcador AHORA: derivado en render — matemática directa minutos × escala px. */
-  const nowMarkerPxValue = nowMarkerTopPx(nowIso);
 
   /* Auto-scroll suave a la posición actual al montar (una sola vez). */
   useEffect(() => {
@@ -369,7 +214,7 @@ export default function DayView({ token, date, day, canManage, clusterId = null,
     const task = window.setTimeout(() => {
       const timeline = timelineRef.current;
       if (!timeline) return;
-      const px = nowMarkerTopPx(nowIso);
+      const px = (baMinutesOf(nowIso) / 60) * COMPACT_ROW_H;
       timeline.scrollTo({ top: Math.max(0, px - timeline.clientHeight / 3), behavior: "smooth" });
       scrolledToNowRef.current = true;
     }, 0);
@@ -402,55 +247,6 @@ export default function DayView({ token, date, day, canManage, clusterId = null,
     });
   };
 
-  /* D1/Fase 2.5-visual: drag & drop sobre el TRACK absoluto — el cursor cae en
-     un casillero de 5' (snap), la regla muestra la hora destino en amarillo y
-     el drop abre el modal de confirmación con ese horario pre-cargado. */
-  const handleTaskDragStart = (task: DayTask) => {
-    setDragSource(task);
-    setDragSnapMin(null);
-  };
-
-  /** Minuto (múltiplo de 5') correspondiente a una coordenada Y del track. */
-  const snapMinuteAt = (clientY: number): number | null => {
-    const track = trackRef.current;
-    if (!track) return null;
-    const rect = track.getBoundingClientRect();
-    const rawMinute = WINDOW_START_MIN + ((clientY - rect.top) / PX_PER_MIN);
-    const snapped = Math.round(rawMinute / DROP_SNAP_MIN) * DROP_SNAP_MIN;
-    return Math.min(WINDOW_END_MIN, Math.max(WINDOW_START_MIN, snapped));
-  };
-
-  const handleTrackDragOver = (event: ReactDragEvent<HTMLDivElement>) => {
-    if (!dragSource) return;
-    event.preventDefault();
-    event.dataTransfer.dropEffect = "move";
-    const minute = snapMinuteAt(event.clientY);
-    if (minute !== null && minute !== dragSnapMin) setDragSnapMin(minute);
-  };
-
-  const handleTrackDragLeave = (event: ReactDragEvent<HTMLDivElement>) => {
-    // Solo limpiar cuando el cursor sale del track entero (no al cruzar hijos).
-    if (event.currentTarget.contains(event.relatedTarget as Node)) return;
-    setDragSnapMin(null);
-  };
-
-  const handleTrackDrop = (event: ReactDragEvent<HTMLDivElement>) => {
-    if (!dragSource) return;
-    event.preventDefault();
-    const task = dragSource;
-    const minute = dragSnapMin ?? snapMinuteAt(event.clientY);
-    setDragSource(null);
-    setDragSnapMin(null);
-    if (!task || minute === null) return;
-    setMoveTime(formatMinuteOf(minute));
-    setConfirmTarget({ task, minute });
-  };
-
-  const clearDrag = () => {
-    setDragSource(null);
-    setDragSnapMin(null);
-  };
-
   /* Fase 2: el movimiento valida contra la agenda del teléfono en el backend
      (reserveSlot 'reject'). Si el horario choca, el 409 trae next_free_slot y
      se ofrece mover al hueco sugerido en lugar de fallar genéricamente. */
@@ -461,8 +257,6 @@ export default function DayView({ token, date, day, canManage, clusterId = null,
       } catch (cause) {
         const apiError = PlannerApiError.from(cause);
         if (apiError.slotConflict && apiError.nextFreeSlot) {
-          setConfirmTarget(null);
-          clearDrag();
           const requestedFor = typeof apiError.data?.requested_scheduled_for === "string"
             ? apiError.data.requested_scheduled_for
             : scheduledFor;
@@ -472,14 +266,6 @@ export default function DayView({ token, date, day, canManage, clusterId = null,
         throw cause;
       }
     });
-  };
-
-  const confirmMove = (task: DayTask, time: string) => {
-    setConfirmTarget(null);
-    clearDrag();
-    const base = task.scheduledFor ? baDateKeyOf(task.scheduledFor) : date;
-    const scheduledFor = new Date(`${base}T${time}:00-03:00`).toISOString();
-    performMove(task, scheduledFor);
   };
 
   const acceptSuggestedSlot = () => {
@@ -535,10 +321,6 @@ export default function DayView({ token, date, day, canManage, clusterId = null,
     });
   };
 
-  const cancelMove = () => {
-    setConfirmTarget(null);
-    clearDrag();
-  };
 
   return (
     <div className="ap-page-stack">
@@ -625,96 +407,6 @@ export default function DayView({ token, date, day, canManage, clusterId = null,
             <span className="ap-badge ap-badge-live"><span className="ap-badge-dot" />{running.length} ejecutando</span>
           </div>
           <div className="ap-timeline-scroll" ref={timelineRef} role="region" aria-label="Agenda del día, scrolleable">
-            {clusterId != null ? (
-            <div className="ap-day-track-wrap">
-              {/* REGLA: columna propia a la IZQUIERDA del track — los rótulos
-                  de hora viven acá y ninguna tarjeta puede taparlos. Ticks
-                  menores cada 15'; los casilleros de 5' son las franjas del track. */}
-              <div className="ap-day-axis" style={{ height: TRACK_HEIGHT_PX }} aria-hidden="true">
-                {HOURS.map((hour) => (
-                  <span
-                    key={hour}
-                    className={`ap-day-axis-hour ${hour === HOURS[0] ? "is-first" : ""}`}
-                    style={{ top: minuteToPx(hour * 60) }}
-                  >
-                    {String(hour).padStart(2, "0")}:00
-                    {/* Línea conectora: une la burbuja con la gridline del track. */}
-                    <i className="ap-day-axis-hourline" style={{ top: hour === HOURS[0] ? "0%" : "50%" }} />
-                  </span>
-                ))}
-                {Array.from({ length: Math.floor(TRACK_TOTAL_MIN / 15) }, (_, i) => 15 * (i + 1))
-                  .filter((m) => m % 60 !== 0 && m < TRACK_TOTAL_MIN)
-                  .map((m) => (
-                    <i key={m} className="ap-day-axis-minor" style={{ top: minuteToPx(WINDOW_START_MIN + m) }} />
-                  ))}
-              </div>
-              <div
-                ref={trackRef}
-                className={`ap-track ${dragSource ? "is-dragging" : ""}`}
-                style={{ height: TRACK_HEIGHT_PX }}
-                onDragOver={handleTrackDragOver}
-                onDragLeave={handleTrackDragLeave}
-                onDrop={handleTrackDrop}
-              >
-              {/* Gridlines horarias dentro del track (sin rótulos: viven en la axis). */}
-              {HOURS.map((hour) => (
-                <div className="ap-hour-gridline" key={hour} style={{ top: minuteToPx(hour * 60) }} />
-              ))}
-
-              {/* Casilleros de 5 minutos SIEMPRE visibles (suaves); al arrastrar
-                  se intensifican y la franja bajo el cursor se ilumina. */}
-              <div className="ap-slot-overlay" aria-hidden="true" />
-              {dragSource && dragSnapMin !== null && (
-                <>
-                  <div
-                    className="ap-drop-band"
-                    style={{ top: minuteToPx(dragSnapMin), height: DROP_SNAP_MIN * PX_PER_MIN }}
-                  />
-                  <div className="ap-drop-guide" style={{ top: minuteToPx(dragSnapMin) }} />
-                  <div className="ap-drag-badge" style={{ top: minuteToPx(dragSnapMin) }} role="status">
-                    <span>{formatMinuteOf(dragSnapMin)}</span>
-                  </div>
-                </>
-              )}
-
-              {/* Tareas: top = minuto de inicio (esquina superior apoyada en la regla). */}
-              {laidOutTasks.map(({ task, startMin, durMin, lane, lanes }) => (
-                <TaskBlock
-                  key={task.id}
-                  task={task}
-                  canManage={canManage}
-                  actionBusy={actionBusy}
-                  onCancel={cancelTask}
-                  onDragStart={handleTaskDragStart}
-                  onDragEnd={clearDrag}
-                  layoutStyle={{
-                    position: "absolute",
-                    top: minuteToPx(startMin),
-                    height: Math.max(44, durMin * PX_PER_MIN - 4),
-                    left: `calc(${(lane / lanes) * 100}% + 3px)`,
-                    width: `calc(${100 / lanes}% - 8px)`,
-                    zIndex: 2 + lane,
-                  }}
-                />
-              ))}
-
-              {/* Indicador AHORA sobre la escala real del track. */}
-              <div
-                className="ap-now-marker"
-                style={{ top: `${Math.min(TRACK_HEIGHT_PX, nowMarkerPxValue) - 1}px` }}
-                role="status"
-                aria-label={`Ahora: ${baTimeOfMinutes(baMinutesOf(nowIso))} Buenos Aires`}
-              />
-              <div
-                className="ap-now-axis"
-                style={{ top: `${Math.min(TRACK_HEIGHT_PX, nowMarkerPxValue)}px` }}
-              >
-                <span className="ap-now-flag">AHORA</span>
-                <span className="ap-now-time">{baTimeOfMinutes(baMinutesOf(nowIso))}</span>
-              </div>
-              </div>
-            </div>
-            ) : (
             <div className="ap-cgrid" style={{ height: 24 * COMPACT_ROW_H }}>
               <i className="ap-axis-line" aria-hidden="true" />
               <div className="ap-c-nowrow" style={{ top: baHourOf(nowIso) * COMPACT_ROW_H, height: COMPACT_ROW_H }} />
@@ -780,7 +472,6 @@ export default function DayView({ token, date, day, canManage, clusterId = null,
                 <span className="ap-now-time">{baTimeOfMinutes(baMinutesOf(nowIso))}</span>
               </div>
             </div>
-            )}
           </div>
         </section>
 
@@ -851,64 +542,6 @@ export default function DayView({ token, date, day, canManage, clusterId = null,
       </div>
 
       {/* D1: modal de confirmación de movimiento por drag & drop */}
-      {confirmTarget && (
-        <div
-          className="ap-modal-overlay"
-          role="dialog"
-          aria-modal="true"
-          aria-label="Confirmar movimiento de tarea"
-          onClick={(event) => { if (event.target === event.currentTarget) cancelMove(); }}
-        >
-          <div className="ap-modal">
-            <div className="ap-modal-head">
-              <div>
-                <p className="ap-eyebrow ap-eyebrow-accent">REAGENDAR TAREA</p>
-                <h3>Mover tarea</h3>
-              </div>
-              <button className="ap-icon-btn" title="Cancelar" onClick={cancelMove}>×</button>
-            </div>
-            <div className="ap-modal-body">
-              <p className="ap-hint" style={{ fontSize: 12, lineHeight: 1.6 }}>
-                Movés la tarea <strong>#{confirmTarget.task.id}</strong> ({taskName(confirmTarget.task)}) de{" "}
-                <strong>{formatBATime(confirmTarget.task.scheduledFor)}</strong> a:
-              </p>
-              <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 8 }}>
-                <input
-                  type="time"
-                  value={moveTime}
-                  min="00:00"
-                  max="23:59"
-                  step={300}
-                  aria-label="Nueva hora de la tarea"
-                  onChange={(event) => setMoveTime(event.target.value || moveTime)}
-                  style={{
-                    background: "rgba(255,255,255,.05)",
-                    border: "1px solid rgba(255,255,255,.14)",
-                    borderRadius: 8,
-                    color: "var(--text, #fff)",
-                    padding: "7px 10px",
-                    fontSize: 13,
-                  }}
-                />
-                <span style={{ color: "var(--text-dim)", fontSize: 11 }}>
-                  El teléfono valida que el horario esté libre; si choca, te ofrecemos el próximo hueco.
-                </span>
-              </div>
-            </div>
-            <div className="ap-modal-foot">
-              <button className="ap-btn ap-btn-ghost ap-btn-sm" onClick={cancelMove}>Cancelar</button>
-              <button
-                className="ap-btn ap-btn-primary ap-btn-sm"
-                disabled={Boolean(actionBusy) || !/^\d{2}:\d{2}$/.test(moveTime)}
-                onClick={() => confirmMove(confirmTarget.task, moveTime)}
-              >
-                {actionBusy ? "Moviendo…" : "Mover tarea"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* Vista compacta: ficha expandida de la tarea (click en mini-card). */}
       {detailTask && (() => {
         const kind = taskKind(detailTask.taskType);
