@@ -412,6 +412,11 @@ export default function DayView({ token, date, day, canManage, clusterId = null,
           <div className="ap-timeline-scroll" ref={timelineRef} role="region" aria-label="Agenda del día, scrolleable">
             <div className="ap-cgrid" style={{ height: 24 * COMPACT_ROW_H + COMPACT_PAD * 2 }}>
               <i className="ap-axis-line" aria-hidden="true" />
+              {/* Carril de la hora EN CURSO: banda + bordes punteados animados. */}
+              <div
+                className="ap-c-nowrow"
+                style={{ top: COMPACT_PAD + baHourOf(nowIso) * COMPACT_ROW_H, height: COMPACT_ROW_H }}
+              />
               {HOURS.map((hour) => (
                 <span
                   key={hour}

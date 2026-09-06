@@ -1005,6 +1005,25 @@
   font-variant-numeric: tabular-nums;
 }
 .ap-planner .ap-c-row { position: absolute; left: 70px; right: 0; border-top: 1px solid rgba(255, 255, 255, .055); }
+/* Carril de la hora EN CURSO: tinte suave + los DOS bordes con puntos
+   verdes marchando izquierda→derecha. Permanece de :00 a :59 de esa hora
+   y salta al carril siguiente cuando cambia la hora. */
+.ap-planner .ap-c-nowrow {
+  position: absolute; left: 70px; right: 0;
+  background: rgba(134, 239, 172, .06);
+  pointer-events: none; z-index: 1;
+}
+.ap-planner .ap-c-nowrow::before,
+.ap-planner .ap-c-nowrow::after {
+  content: ""; position: absolute; left: 0; right: 0; height: 2px;
+  background: repeating-linear-gradient(to right,
+    rgba(134, 239, 172, 0.9) 0 8px,
+    rgba(134, 239, 172, 0) 8px 16px);
+  filter: drop-shadow(0 0 6px rgba(34, 197, 94, 0.35));
+  animation: apNowMarch 0.9s linear infinite;
+}
+.ap-planner .ap-c-nowrow::before { top: 0; }
+.ap-planner .ap-c-nowrow::after { bottom: 0; }
 
 /* ============================================================
    v6 — Modal "Crear cluster": picker de cuentas scaneadas
@@ -1404,6 +1423,8 @@
 @media (prefers-reduced-motion: reduce) {
   .ap-planner .ap-mini.is-running { animation: none; }
   .ap-planner .ap-mini-live { animation: none; }
+  .ap-planner .ap-c-nowrow::before,
+  .ap-planner .ap-c-nowrow::after { animation: none; }
 }
 /* Pill del AHORA dentro de la grilla compacta: gutter izquierdo. */
 /* Pill del AHORA dentro de la grilla compacta: gutter izquierdo. */
