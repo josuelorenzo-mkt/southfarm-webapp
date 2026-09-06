@@ -181,15 +181,15 @@ export default function DayView({ token, date, day, canManage, clusterId = null,
       const t = tms / 1000;
       const grid = gridRef.current;
       if (grid) {
-        grid.style.setProperty("--march-x", `${(t * 17.8) % 16}px`);
+        grid.style.setProperty("--march-x", `${(t * 28) % 20}px`);
         grid.style.setProperty("--live-op", (0.25 + 0.75 * (0.5 + 0.5 * Math.sin(t * 3.2))).toFixed(3));
         grid.style.setProperty("--pulse", `${(3.5 + 3.5 * (0.5 + 0.5 * Math.sin(t * 3.9))).toFixed(2)}px`);
       }
       const pill = pillRef.current;
       if (pill) {
         const k = 0.5 + 0.5 * Math.sin(t * 3.5);
-        pill.style.boxShadow = `0 4px 16px rgba(0, 0, 0, 0.5), 0 0 ${(10 + 14 * k).toFixed(1)}px rgba(34, 197, 94, ${(0.22 + 0.38 * k).toFixed(3)})`;
-        pill.style.borderColor = `rgba(134, 239, 172, ${(0.45 + 0.4 * k).toFixed(3)})`;
+        pill.style.boxShadow = `inset 0 0 ${(4 + 6 * k).toFixed(1)}px rgba(34, 197, 94, ${(0.35 + 0.45 * k).toFixed(3)}), 0 0 ${(2 + 4 * k).toFixed(1)}px rgba(34, 197, 94, ${(0.3 + 0.4 * k).toFixed(3)})`;
+        pill.style.borderColor = `rgba(134, 239, 172, ${(0.5 + 0.45 * k).toFixed(3)})`;
       }
       raf = requestAnimationFrame(tick);
     };
