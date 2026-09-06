@@ -65,43 +65,46 @@ function taskName(task: DayTask): string {
   return `Warmup ${task.platform ? (PLATFORM_META[task.platform]?.short || "") : ""}`.trim();
 }
 
-function baHourOf(iso: string): number {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: BUENOS_AIRES_TIMEZONE,
-    hour: "2-digit",
-    hourCycle: "h23",
-  }).formatToParts(new Date(iso));
-  return Number(parts.find((part) => part.type === "hour")?.value || 12);
-}
-
-function baDateKeyOf(iso: string): string {
-  const parts = new Intl.DateTimeFormat("en-US", {
+/** Partes de fecha/hora en BA de un ISO; null si el ISO es inválido.
+ *  formatToParts sobre Invalid Date lanza RangeError y tumba TODA la vista:
+ *  las tres utilidades de abajo defensas contra un scheduledFor null/raro. */
+function baPartsOf(iso: string): Intl.DateTimeFormatPart[] | null {
+  const parsed = new Date(iso);
+  if (!Number.isFinite(parsed.getTime())) return null;
+  return new Intl.DateTimeFormat("en-US", {
     timeZone: BUENOS_AIRES_TIMEZONE,
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
-  }).formatToParts(new Date(iso));
-  const year = parts.find((part) => part.type === "year")?.value || "";
-  const month = parts.find((part) => part.type === "month")?.value || "";
-  const day = parts.find((part) => part.type === "day")?.value || "";
-  return `${year}-${month}-${day}`;
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(parsed);
+}
+
+function partValue(parts: Intl.DateTimeFormatPart[] | null, type: Intl.DateTimeFormatPartTypes): string {
+  return parts?.find((part) => part.type === type)?.value || "";
+}
+
+function baHourOf(iso: string): number {
+  return Number(partValue(baPartsOf(iso), "hour") || 0);
+}
+
+function baDateKeyOf(iso: string): string {
+  const parts = baPartsOf(iso);
+  if (!parts) return "";
+  return `${partValue(parts, "year")}-${partValue(parts, "month")}-${partValue(parts, "day")}`;
 }
 
 function isNowInHour(hour: number, nowIso: string): boolean {
   return baHourOf(nowIso) === hour;
 }
 
-/** Minutos del día en BA (0–1439) de un ISO UTC. */
+/** Minutos del día en BA (0–1439) de un ISO UTC; 0 si el ISO es inválido. */
 function baMinutesOf(iso: string): number {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: BUENOS_AIRES_TIMEZONE,
-    hour: "2-digit",
-    minute: "2-digit",
-    hourCycle: "h23",
-  }).formatToParts(new Date(iso));
-  const hour = Number(parts.find((part) => part.type === "hour")?.value || 0);
-  const minute = Number(parts.find((part) => part.type === "minute")?.value || 0);
-  return hour * 60 + minute;
+  const parts = baPartsOf(iso);
+  if (!parts) return 0;
+  return Number(partValue(parts, "hour") || 0) * 60 + Number(partValue(parts, "minute") || 0);
 }
 
 /** "HH:mm" en BA a partir de minutos del día. */
@@ -332,17 +335,8 @@ export default function DayView({ token, date, day, canManage, clusterId = null,
     }
   };
 
-  /** Detalle (vista compacta): abrir ficha y mover/cancelar desde el modal. */
-  const openDetail = (task: DayTask) => {
-    setDetailTask(task);
-    setDetailMoveTime(formatBATime(task.scheduledFor || ""));
-  };
-  const doDetailMove = () => {
-    if (!detailTask) return;
-    const task = detailTask;
-    setDetailTask(null);
-    performMove(task, new Date(`${baDateKeyOf(task.scheduledFor || "")}T${detailMoveTime}:00-03:00`).toISOString());
-  };
+  /** Detalle (vista compacta): la ficha se abre desde la mini-card y el
+      movimiento/cancelación se resuelven dentro del modal. */
 
   const confirmCascade = () => {
     if (!cascadePlan) return;
@@ -683,7 +677,7 @@ export default function DayView({ token, date, day, canManage, clusterId = null,
             <div className="ap-modal-body">
               <p className="ap-hint" style={{ fontSize: 12, lineHeight: 1.6 }}>
                 La tarea <strong>#{slotConflict.task.id}</strong> ({taskName(slotConflict.task)}) no puede moverse a las{" "}
-                <strong>{formatBATime(slotConflict.task.scheduledFor)}</strong> porque se encima con otra tarea
+                <strong>{formatBATime(slotConflict.requestedFor)}</strong> porque se encima con otra tarea
                 del mismo teléfono (cada tarea reserva su ventana con margen).
               </p>
             </div>
