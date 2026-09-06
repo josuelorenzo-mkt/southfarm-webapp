@@ -541,7 +541,7 @@ export default function DayView({ token, date, day, canManage, clusterId = null,
             </div>
           </section>
 
-          {clusterId != null && (
+          {clusterId != null && canManage && (
             <QuickAddPanel
               token={token}
               clusterId={clusterId}
@@ -623,34 +623,38 @@ export default function DayView({ token, date, day, canManage, clusterId = null,
                   {detailTask.durationMin != null ? ` · ${detailTask.durationMin} min` : ""}
                 </dd></div>
                 <div className="ap-detail-row"><dt>Origen</dt><dd>{detailTask.source === "manual" ? "Manual" : "Automática (rutina)"}</dd></div>
-                <div className="ap-detail-move">
-                  <input
-                    type="time"
-                    className="ap-qa-time"
-                    value={detailMoveTime}
-                    step={300}
-                    aria-label="Nueva hora para mover la tarea"
-                    onChange={(event) => setDetailMoveTime(event.target.value || detailMoveTime)}
-                  />
-                  <button
-                    className="ap-btn ap-btn-sm"
-                    disabled={Boolean(actionBusy)}
-                    onClick={() => { const t = detailTask; setDetailTask(null); performMove(t, new Date(`${baDateKeyOf(t.scheduledFor || "")}T${detailMoveTime}:00-03:00`).toISOString()); }}
-                  >
-                    Mover a esa hora
-                  </button>
-                  <span className="ap-qa-note">si pisa otra tarea, se ofrece próximo hueco o cascada</span>
-                </div>
+                {canManage && (
+                  <div className="ap-detail-move">
+                    <input
+                      type="time"
+                      className="ap-qa-time"
+                      value={detailMoveTime}
+                      step={300}
+                      aria-label="Nueva hora para mover la tarea"
+                      onChange={(event) => setDetailMoveTime(event.target.value || detailMoveTime)}
+                    />
+                    <button
+                      className="ap-btn ap-btn-sm"
+                      disabled={Boolean(actionBusy)}
+                      onClick={() => { const t = detailTask; setDetailTask(null); performMove(t, new Date(`${baDateKeyOf(t.scheduledFor || "")}T${detailMoveTime}:00-03:00`).toISOString()); }}
+                    >
+                      Mover a esa hora
+                    </button>
+                    <span className="ap-qa-note">si pisa otra tarea, se ofrece próximo hueco o cascada</span>
+                  </div>
+                )}
               </div>
               <div className="ap-modal-foot">
                 <button className="ap-btn ap-btn-ghost ap-btn-sm" onClick={() => setDetailTask(null)}>Cerrar</button>
-                <button
-                  className="ap-btn ap-btn-danger ap-btn-sm"
-                  disabled={Boolean(actionBusy)}
-                  onClick={() => { const t = detailTask; setDetailTask(null); cancelTask(t); }}
-                >
-                  Cancelar tarea
-                </button>
+                {canManage && (
+                  <button
+                    className="ap-btn ap-btn-danger ap-btn-sm"
+                    disabled={Boolean(actionBusy)}
+                    onClick={() => { const t = detailTask; setDetailTask(null); cancelTask(t); }}
+                  >
+                    Cancelar tarea
+                  </button>
+                )}
               </div>
             </div>
           </div>
