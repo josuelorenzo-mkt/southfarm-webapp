@@ -691,8 +691,17 @@
   border: 1px solid rgba(134, 239, 172, 0.55); border-radius: 99px;
   background: rgba(9, 9, 11, 0.94);
   backdrop-filter: blur(8px);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5), 0 0 14px rgba(34, 197, 94, 0.18);
   white-space: nowrap;
+}
+@keyframes apPillGlow {
+  0%, 100% {
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5), 0 0 10px rgba(34, 197, 94, 0.22);
+    border-color: rgba(134, 239, 172, 0.45);
+  }
+  50% {
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5), 0 0 24px rgba(34, 197, 94, 0.55);
+    border-color: rgba(134, 239, 172, 0.85);
+  }
 }
 /* fuera de la ventana 12:00–22:00: clamp atenuado (línea punteada gris) */
 /* fuera de la ventana 12:00–22:00: clamp atenuado (puntos grises) */
@@ -702,10 +711,6 @@
 @media (max-width: 760px) {
   .ap-planner .ap-days-row { flex-wrap: wrap; }
   .ap-planner .ap-day-chip { min-width: 42px; }
-}
-@media (prefers-reduced-motion: reduce) {
-  .ap-planner .ap-c-nowrow::before,
-  .ap-planner .ap-c-nowrow::after { animation: none; }
 }
 
 /* ============================================================
@@ -1019,8 +1024,8 @@
   background: repeating-linear-gradient(to right,
     rgba(134, 239, 172, 0.9) 0 8px,
     rgba(134, 239, 172, 0) 8px 16px);
+  background-position: var(--march-x, 0px) 0;
   filter: drop-shadow(0 0 6px rgba(34, 197, 94, 0.35));
-  animation: apNowMarch 0.9s linear infinite;
 }
 .ap-planner .ap-c-nowrow::before { top: 0; }
 .ap-planner .ap-c-nowrow::after { bottom: 0; }
@@ -1406,25 +1411,14 @@
   border-color: rgba(134, 239, 172, .8);
   border-left-color: #4ade80;
   background: linear-gradient(180deg, rgba(134, 239, 172, .10), rgba(134, 239, 172, .03));
-  animation: apMiniPulse 1.6s ease-out infinite;
+  box-shadow: 0 0 0 var(--pulse, 0px) rgba(74, 222, 128, .45);
 }
 .ap-planner .ap-mini.is-running .ap-mini-time { color: #bbf7d0; }
 .ap-planner .ap-mini-live {
   width: 8px; height: 8px; border-radius: 50%;
   background: #4ade80;
   box-shadow: 0 0 8px rgba(74, 222, 128, .8);
-  animation: apLiveBlink 1s ease-in-out infinite;
-}
-@keyframes apLiveBlink { 50% { opacity: .25; } }
-@keyframes apMiniPulse {
-  0% { box-shadow: 0 0 0 0 rgba(74, 222, 128, .5); }
-  100% { box-shadow: 0 0 0 10px rgba(74, 222, 128, 0); }
-}
-@media (prefers-reduced-motion: reduce) {
-  .ap-planner .ap-mini.is-running { animation: none; }
-  .ap-planner .ap-mini-live { animation: none; }
-  .ap-planner .ap-c-nowrow::before,
-  .ap-planner .ap-c-nowrow::after { animation: none; }
+  opacity: var(--live-op, 1);
 }
 /* Pill del AHORA dentro de la grilla compacta: gutter izquierdo. */
 /* Pill del AHORA dentro de la grilla compacta: gutter izquierdo. */

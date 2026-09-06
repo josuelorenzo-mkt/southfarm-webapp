@@ -159,6 +159,8 @@ export default function DayView({ token, date, day, canManage, clusterId = null,
   const [nowIso, setNowIso] = useState<string>(() => new Date().toISOString());
   const timelineRef = useRef<HTMLDivElement | null>(null);
   const scrolledToNowRef = useRef(false);
+  const gridRef = useRef<HTMLDivElement | null>(null);
+  const pillRef = useRef<HTMLSpanElement | null>(null);
   /** Vista compacta (día completo): tarea expandida en modal. */
   const [detailTask, setDetailTask] = useState<DayTask | null>(null);
   const [detailMoveTime, setDetailMoveTime] = useState("");
@@ -166,6 +168,33 @@ export default function DayView({ token, date, day, canManage, clusterId = null,
   useEffect(() => {
     const interval = window.setInterval(() => setNowIso(new Date().toISOString()), NOW_REFRESH_MS);
     return () => window.clearInterval(interval);
+  }, []);
+
+  /* Motor de animación por rAF: drive los efectos con variables CSS en el
+     contenedor (--march-x, --pulse, --live-op) y shadow del pill por ref.
+     Va por requestAnimationFrame a propósito: el clamp de
+     prefers-reduced-motion del navegador congela las ANIMACIONES CSS, pero
+     nunca el rAF — así el movimiento vive siempre, en cualquier equipo. */
+  useEffect(() => {
+    let raf = 0;
+    const tick = (tms: number) => {
+      const t = tms / 1000;
+      const grid = gridRef.current;
+      if (grid) {
+        grid.style.setProperty("--march-x", `${(t * 17.8) % 16}px`);
+        grid.style.setProperty("--live-op", (0.25 + 0.75 * (0.5 + 0.5 * Math.sin(t * 3.2))).toFixed(3));
+        grid.style.setProperty("--pulse", `${(3.5 + 3.5 * (0.5 + 0.5 * Math.sin(t * 3.9))).toFixed(2)}px`);
+      }
+      const pill = pillRef.current;
+      if (pill) {
+        const k = 0.5 + 0.5 * Math.sin(t * 3.5);
+        pill.style.boxShadow = `0 4px 16px rgba(0, 0, 0, 0.5), 0 0 ${(10 + 14 * k).toFixed(1)}px rgba(34, 197, 94, ${(0.22 + 0.38 * k).toFixed(3)})`;
+        pill.style.borderColor = `rgba(134, 239, 172, ${(0.45 + 0.4 * k).toFixed(3)})`;
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
   }, []);
 
   const toggleFilter = (key: "warmup" | "scan" | "publish" | "late") => {
@@ -410,7 +439,11 @@ export default function DayView({ token, date, day, canManage, clusterId = null,
             <span className="ap-badge ap-badge-live"><span className="ap-badge-dot" />{running.length} ejecutando</span>
           </div>
           <div className="ap-timeline-scroll" ref={timelineRef} role="region" aria-label="Agenda del día, scrolleable">
-            <div className="ap-cgrid" style={{ height: 24 * COMPACT_ROW_H + COMPACT_PAD * 2 }}>
+            <div
+              className="ap-cgrid"
+              ref={gridRef}
+              style={{ height: 24 * COMPACT_ROW_H + COMPACT_PAD * 2 }}
+            >
               <i className="ap-axis-line" aria-hidden="true" />
               {/* Carril de la hora EN CURSO: banda + bordes punteados animados. */}
               <div
@@ -486,7 +519,7 @@ export default function DayView({ token, date, day, canManage, clusterId = null,
                 style={{ top: `${COMPACT_PAD + baHourOf(nowIso) * COMPACT_ROW_H + COMPACT_ROW_H / 2}px` }}
               >
                 <span className="ap-now-flag">AHORA</span>
-                <span className="ap-now-time">{baTimeOfMinutes(baMinutesOf(nowIso))}</span>
+                <span className="ap-now-time" ref={pillRef}>{baTimeOfMinutes(baMinutesOf(nowIso))}</span>
               </div>
             </div>
           </div>
