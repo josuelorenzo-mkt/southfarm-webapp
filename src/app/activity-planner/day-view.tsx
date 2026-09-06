@@ -421,6 +421,11 @@ export default function DayView({ token, date, day, canManage, clusterId = null,
                   {String(hour).padStart(2, "0")}:00
                 </span>
               ))}
+              {/* Cierre del día: línea + chip 00:00 del día siguiente. */}
+              <div className="ap-c-row" style={{ top: COMPACT_PAD + 24 * COMPACT_ROW_H }} />
+              <span className="ap-c-hour" style={{ top: COMPACT_PAD + 24 * COMPACT_ROW_H }}>
+                00:00
+              </span>
               {HOURS.map((hour) => (
                 <div className="ap-c-row" key={hour} style={{ top: COMPACT_PAD + hour * COMPACT_ROW_H, height: COMPACT_ROW_H }}>
                   <div className="ap-c-lane">
@@ -429,16 +434,15 @@ export default function DayView({ token, date, day, canManage, clusterId = null,
                       const endIso = task.durationMin != null && task.durationMin > 0
                         ? new Date(Date.parse(task.scheduledFor || "") + task.durationMin * 60e3).toISOString()
                         : null;
-                      // Activa = corriendo, o pendiente cuya ventana cubre el
-                      // momento actual (en producción el teléfono la tendría
-                      // reclamada: mismo tratamiento visual).
+                      // Activa = SU VENTANA cubre el momento actual (regla
+                      // única, sin importar el status: en producción una tarea
+                      // en horario estaría running; en el sandbox puede quedar
+                      // pending — visualmente significan lo mismo).
                       const startMin = baMinutesOf(task.scheduledFor || "");
                       const durMin = Math.max(10, Number(task.durationMin) || 45);
                       const nowMin = baMinutesOf(nowIso);
-                      const isRunning = task.status === "running";
-                      const isActive = isRunning
-                        || (["pending", "overdue"].includes(task.status)
-                          && startMin <= nowMin && nowMin < startMin + durMin);
+                      const isActive = ["pending", "overdue", "running"].includes(task.status)
+                        && startMin <= nowMin && nowMin < startMin + durMin;
                       return (
                         <button
                           key={task.id}
@@ -451,7 +455,7 @@ export default function DayView({ token, date, day, canManage, clusterId = null,
                             <span className="ap-mini-left">
                               <PlatformLogo platform={task.platform} size={16} brand />
                               <span className="ap-mini-kind">
-                                {isRunning && <i className="ap-mini-live" />}
+                                {isActive && <i className="ap-mini-live" />}
                                 {TASK_ICONS[kind]}{KIND_LABEL[kind]}
                               </span>
                             </span>
