@@ -242,36 +242,25 @@ export default function PlannerPage({ token, canManage }: PlannerPageProps) {
   return (
     <div className="ap-planner">
       <div className="ap-page-stack">
-        {/* Header */}
-        {view === "week" && (
-          <section className="ap-week-head">
-            <div>
-              <p className="ap-eyebrow ap-eyebrow-accent">SEMANA ACTUAL · BUENOS AIRES</p>
-              <h2>La semana de todas tus <em>marcas.</em></h2>
-              <p>Warmups, scans y publicaciones en una sola agenda. Pasá el mouse por el chart para ver el día a día.</p>
-            </div>
-            <div className="ap-week-controls">
-              <div className="ap-week-range">
-                <button title="Semana anterior" aria-label="Semana anterior" onClick={() => navigateWeek(-1)}><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6" /></svg></button>
-                <span>{weekTitle}</span>
-                <button title="Semana siguiente" aria-label="Semana siguiente" onClick={() => navigateWeek(1)}><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6-6-6" /></svg></button>
-              </div>
-              <button className="ap-btn" onClick={goToToday}>Hoy</button>
-              <button className="ap-btn ap-btn-primary" onClick={() => openDay(todayKey, null)}>
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3.5" y="4.5" width="17" height="16" rx="2.5" /><path d="M3.5 9.5h17M8 3v3M16 3v3" /></svg>
-                Ver día de hoy
-              </button>
-            </div>
-          </section>
-        )}
-        {/* La vista día lleva su propio header (ap-day-head) dentro de DayView:
-            no se repite acá para evitar el título duplicado (fix v3). */}
-
-        {/* Barra de estado */}
-        <div className="ap-week-controls" style={{ justifyContent: "space-between" }}>
+        {/* BARRA DE MANDO — FIJA: primera fila en TODAS las vistas. Los tabs
+            y (en las vistas de día) el selector ‹ fecha › / Ahora / Volver a
+            la semana viven acá: al paginar no cambia ni su altura ni su
+            posición, cualquiera sea el header de la vista de turno. */}
+        <div className="ap-week-controls ap-toolbar" style={{ justifyContent: "space-between" }}>
           <div className="ap-week-controls">
             <span className="ap-badge ap-badge-live"><span className="ap-badge-dot" />En vivo · {week?.now ? formatBATime(week.now) : "—"} BA</span>
             <span className="ap-last-sync" style={{ color: "var(--text-muted)", fontSize: 11 }}>Actualizado {lastSync ? relativeBA(lastSync) : "…"}</span>
+            {view === "day" && (
+              <>
+                <div className="ap-week-range">
+                  <button title="Día anterior" aria-label="Día anterior" onClick={() => navigateDay(-1)}><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6" /></svg></button>
+                  <span>{shortDate(dayDate)}</span>
+                  <button title="Día siguiente" aria-label="Día siguiente" onClick={() => navigateDay(1)}><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6-6-6" /></svg></button>
+                </div>
+                <button className="ap-btn" onClick={goToToday}>Ahora</button>
+                <button className="ap-btn ap-btn-ghost" onClick={() => setView("week")}>Volver a la semana</button>
+              </>
+            )}
           </div>
           <div className="ap-week-controls">
             {view === "week" && (
@@ -315,6 +304,30 @@ export default function PlannerPage({ token, canManage }: PlannerPageProps) {
             </div>
           </div>
         </div>
+
+        {/* Header de la semana: solo en vista semana, SIEMPRE debajo de la
+            barra de mando fija. */}
+        {view === "week" && (
+          <section className="ap-week-head">
+            <div>
+              <p className="ap-eyebrow ap-eyebrow-accent">SEMANA ACTUAL · BUENOS AIRES</p>
+              <h2>La semana de todas tus <em>marcas.</em></h2>
+              <p>Warmups, scans y publicaciones en una sola agenda. Pasá el mouse por el chart para ver el día a día.</p>
+            </div>
+            <div className="ap-week-controls">
+              <div className="ap-week-range">
+                <button title="Semana anterior" aria-label="Semana anterior" onClick={() => navigateWeek(-1)}><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6" /></svg></button>
+                <span>{weekTitle}</span>
+                <button title="Semana siguiente" aria-label="Semana siguiente" onClick={() => navigateWeek(1)}><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6-6-6" /></svg></button>
+              </div>
+              <button className="ap-btn" onClick={goToToday}>Hoy</button>
+              <button className="ap-btn ap-btn-primary" onClick={() => openDay(todayKey, null)}>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3.5" y="4.5" width="17" height="16" rx="2.5" /><path d="M3.5 9.5h17M8 3v3M16 3v3" /></svg>
+                Ver día de hoy
+              </button>
+            </div>
+          </section>
+        )}
 
         {error && <div className="cc-alert cc-alert-error"><span>{error}<button onClick={() => setError("")}>×</button></span></div>}
 
@@ -391,10 +404,6 @@ export default function PlannerPage({ token, canManage }: PlannerPageProps) {
               clusterAccounts={dayClusterId !== null ? (week?.clusters.find((candidate) => candidate.id === dayClusterId)?.accounts || []) : []}
               workspaceAccounts={workspaceAccounts}
               canManage={canManage}
-              onBackToWeek={() => setView("week")}
-              onPrevDay={() => navigateDay(-1)}
-              onNextDay={() => navigateDay(1)}
-              onGoToToday={goToToday}
               onChanged={() => void loadDay(dayDate, true, dayClusterId)}
             />
           ) : (

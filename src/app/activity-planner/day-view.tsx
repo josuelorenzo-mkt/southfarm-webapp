@@ -20,7 +20,6 @@ import {
   TASK_TYPE_META,
   formatBATime,
   publicationBadgeClass,
-  shortDate,
 } from "./types";
 import QuickAddPanel from "./quick-add-panel";
 import { PlatformLogo } from "./platform-logos";
@@ -137,15 +136,10 @@ interface DayViewProps {
   /** Acciones rápidas: cuentas del clúster + device_id por cuenta. */
   clusterAccounts?: ClusterAccount[];
   workspaceAccounts?: { id: number; device_id: number }[];
-  onBackToWeek: () => void;
-  onPrevDay: () => void;
-  onNextDay: () => void;
-  /** Saltar a la fecha de hoy (botón "Ahora" del header). */
-  onGoToToday: () => void;
   onChanged: () => void;
 }
 
-export default function DayView({ token, date, day, canManage, clusterId = null, clusterName = null, clusterAccounts = [], workspaceAccounts = [], onBackToWeek, onPrevDay, onNextDay, onGoToToday, onChanged }: DayViewProps) {
+export default function DayView({ token, date, day, canManage, clusterId = null, clusterName = null, clusterAccounts = [], workspaceAccounts = [], onChanged }: DayViewProps) {
   const [filters, setFilters] = useState<{ warmup: boolean; scan: boolean; publish: boolean; late: boolean }>({
     warmup: true,
     scan: true,
@@ -369,6 +363,9 @@ export default function DayView({ token, date, day, canManage, clusterId = null,
     <div className="ap-page-stack">
       {error && <div className="cc-alert cc-alert-error"><span>{error}<button onClick={() => setError("")}>×</button></span></div>}
 
+      {/* El header de la vista día es solo el título: la navegación de fecha
+          (‹ › / Ahora / Volver a la semana) vive en la barra de mando fija de
+          planner-page para no moverse entre vistas. */}
       <section className="ap-day-head">
         <div>
           {clusterName ? (
@@ -384,15 +381,6 @@ export default function DayView({ token, date, day, canManage, clusterId = null,
               <p>Todos los clústeres juntos · un teléfono ejecuta una tarea a la vez.</p>
             </>
           )}
-        </div>
-        <div className="ap-day-controls">
-          <div className="ap-week-range">
-            <button title="Día anterior" aria-label="Día anterior" onClick={onPrevDay}><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6" /></svg></button>
-            <span>{shortDate(date)}</span>
-            <button title="Día siguiente" aria-label="Día siguiente" onClick={onNextDay}><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6-6-6" /></svg></button>
-          </div>
-          <button className="ap-btn" onClick={onGoToToday}>Ahora</button>
-          <button className="ap-btn ap-btn-ghost" onClick={onBackToWeek}>Volver a la semana</button>
         </div>
       </section>
 

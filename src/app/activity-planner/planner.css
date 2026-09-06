@@ -274,6 +274,22 @@
 .ap-week-head p:not(.ap-eyebrow) { color: var(--text-secondary); font-size: 13px; }
 .ap-week-controls { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 
+/* Barra de mando fija (planner-page): primera fila de la sección en TODAS
+   las vistas — tabs + selector de fecha no cambian de altura al paginar.
+   El hairline inferior la ancla visualmente como barra permanente y el
+   min-height reserva el alto del caso más alto (día: selector de fecha) —
+   en semana la fila queda igual y los tabs no se mueven un pixel. */
+.ap-toolbar {
+  min-height: 40px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+/* El selector de fecha de la toolbar mide lo mismo que el segmented (36px):
+   si midiera 40, la fila crece en vistas de día y los tabs quedan 2px más
+   abajo que en semana — exactamente lo que esta barra elimina. */
+.ap-toolbar .ap-week-range { padding: 2px; }
+
 .ap-week-range { display: flex; align-items: center; gap: 4px; padding: 4px; border: 1px solid var(--border-subtle); border-radius: 10px; background: rgba(0, 0, 0, 0.16); }
 .ap-week-range button { min-height: 30px; min-width: 32px; display: grid; place-items: center; color: var(--text-muted); border: 0; border-radius: 7px; background: transparent; }
 .ap-week-range button:hover { color: var(--text-primary); background: var(--bg-hover); }
