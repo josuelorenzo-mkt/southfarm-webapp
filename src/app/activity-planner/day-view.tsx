@@ -33,6 +33,9 @@ const HOURS = Array.from({ length: 24 }, (_, i) => i);
     con el alto mínimo de tarjeta sin invadir el turno siguiente. */
 /** Vista compacta "Día completo": alto fijo de cada carril-hora. */
 const COMPACT_ROW_H = 152;
+/** Aire arriba y abajo de la grilla: permite que el chip 00:00 quede
+ *  CENTRADO en su línea (como todos) sin recortarse con el scroll. */
+const COMPACT_PAD = 18;
 const KIND_LABEL: Record<"warmup" | "scan" | "publish", string> = {
   warmup: "Warmup", scan: "Scan", publish: "Post",
 };
@@ -214,7 +217,7 @@ export default function DayView({ token, date, day, canManage, clusterId = null,
     const task = window.setTimeout(() => {
       const timeline = timelineRef.current;
       if (!timeline) return;
-      const px = baHourOf(nowIso) * COMPACT_ROW_H + COMPACT_ROW_H / 2;
+      const px = COMPACT_PAD + baHourOf(nowIso) * COMPACT_ROW_H + COMPACT_ROW_H / 2;
       timeline.scrollTo({ top: Math.max(0, px - timeline.clientHeight / 2), behavior: "smooth" });
       scrolledToNowRef.current = true;
     }, 0);
@@ -407,19 +410,19 @@ export default function DayView({ token, date, day, canManage, clusterId = null,
             <span className="ap-badge ap-badge-live"><span className="ap-badge-dot" />{running.length} ejecutando</span>
           </div>
           <div className="ap-timeline-scroll" ref={timelineRef} role="region" aria-label="Agenda del día, scrolleable">
-            <div className="ap-cgrid" style={{ height: 24 * COMPACT_ROW_H }}>
+            <div className="ap-cgrid" style={{ height: 24 * COMPACT_ROW_H + COMPACT_PAD * 2 }}>
               <i className="ap-axis-line" aria-hidden="true" />
               {HOURS.map((hour) => (
                 <span
                   key={hour}
-                  className={`ap-c-hour ${hour === 0 ? "is-first" : ""}`}
-                  style={{ top: hour * COMPACT_ROW_H }}
+                  className="ap-c-hour"
+                  style={{ top: COMPACT_PAD + hour * COMPACT_ROW_H }}
                 >
                   {String(hour).padStart(2, "0")}:00
                 </span>
               ))}
               {HOURS.map((hour) => (
-                <div className="ap-c-row" key={hour} style={{ top: hour * COMPACT_ROW_H, height: COMPACT_ROW_H }}>
+                <div className="ap-c-row" key={hour} style={{ top: COMPACT_PAD + hour * COMPACT_ROW_H, height: COMPACT_ROW_H }}>
                   <div className="ap-c-lane">
                     {(compactByHour.get(hour) || []).map((task) => {
                       const kind = taskKind(task.taskType);
@@ -471,7 +474,7 @@ export default function DayView({ token, date, day, canManage, clusterId = null,
                   sigue mostrando la hora exacta como reloj. */}
               <div
                 className="ap-now-axis"
-                style={{ top: `${baHourOf(nowIso) * COMPACT_ROW_H + COMPACT_ROW_H / 2}px` }}
+                style={{ top: `${COMPACT_PAD + baHourOf(nowIso) * COMPACT_ROW_H + COMPACT_ROW_H / 2}px` }}
               >
                 <span className="ap-now-flag">AHORA</span>
                 <span className="ap-now-time">{baTimeOfMinutes(baMinutesOf(nowIso))}</span>

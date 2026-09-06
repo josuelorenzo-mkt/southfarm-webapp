@@ -1409,7 +1409,7 @@
 /* Pill del AHORA dentro de la grilla compacta: gutter izquierdo. */
 /* Línea vertical del eje: vive SOLO en el gutter — jamás cruza tarjetas. */
 .ap-planner .ap-cgrid .ap-axis-line {
-  position: absolute; left: 62px; top: 0; bottom: 0;
+  position: absolute; left: 62px; top: 18px; bottom: 18px;
   width: 1px; background: rgba(255, 255, 255, .14);
 }
 
@@ -1434,7 +1434,4 @@
 .ap-planner .ap-detail-row dd svg:first-child { margin-right: 5px; }
 
 /* El chip 00:00 no se centra sobre el borde: se apoya debajo (evita recorte). */
-.ap-planner .ap-c-hour.is-first { transform: none; top: 3px; }
-
-/* El chip 00:00 se apoya debajo de su línea (evita recorte con el borde). */
 .ap-planner .ap-c-hour.is-first { transform: none; top: 3px; }
