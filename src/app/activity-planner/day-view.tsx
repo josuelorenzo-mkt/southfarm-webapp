@@ -163,6 +163,9 @@ export default function DayView({ token, date, day, canManage, clusterId = null,
   const timelineRef = useRef<HTMLDivElement | null>(null);
   const scrolledToNowRef = useRef(false);
   const gridRef = useRef<HTMLDivElement | null>(null);
+  /** Carril de la hora EN CURSO: la fase de la marcha se escribe acá (y no
+   *  en el grid) para no invalidar los estilos de todo el tablero por frame. */
+  const nowRowRef = useRef<HTMLDivElement | null>(null);
   const pillRef = useRef<HTMLSpanElement | null>(null);
   /** Vista compacta (día completo): tarea expandida en modal. */
   const [detailTask, setDetailTask] = useState<DayTask | null>(null);
@@ -174,25 +177,39 @@ export default function DayView({ token, date, day, canManage, clusterId = null,
   }, []);
 
   /* Motor de animación por rAF: drive los efectos con variables CSS en el
-     contenedor (--march-x, --pulse, --live-op) y shadow del pill por ref.
-     Va por requestAnimationFrame a propósito: el clamp de
+     carril AHORA (--march-x) y en el grid (--pulse, --live-op) + shadow del
+     pill por ref. Va por requestAnimationFrame a propósito: el clamp de
      prefers-reduced-motion del navegador congela las ANIMACIONES CSS, pero
      nunca el rAF — así el movimiento vive siempre, en cualquier equipo. */
   useEffect(() => {
     let raf = 0;
+    /* La marcha corre a 60 fps y su variable se escribe SOLO en el carril
+       AHORA (subárbol de un elemento): escribirla en el grid invalidaba los
+       estilos de todas las tarjetas en cada frame. El pulso/glow (periodo
+       ~1.7 s) basta a ~12 Hz y no se percibe la diferencia. */
+    let lastGlow = 0;
     const tick = (tms: number) => {
       const t = tms / 1000;
-      const grid = gridRef.current;
-      if (grid) {
-        grid.style.setProperty("--march-x", `${(t * 28) % 20}px`);
-        grid.style.setProperty("--live-op", (0.25 + 0.75 * (0.5 + 0.5 * Math.sin(t * 3.2))).toFixed(3));
-        grid.style.setProperty("--pulse", `${(3.5 + 3.5 * (0.5 + 0.5 * Math.sin(t * 3.9))).toFixed(2)}px`);
+      const nowRow = nowRowRef.current;
+      if (nowRow) {
+        // El gradiente de puntos repite cada 16 px: envolver la fase en 16
+        // hace el loop invisible. El `% 20` viejo salteaba 4 px hacia atrás
+        // ~1,4 veces por segundo — el "trabón" de la franja.
+        nowRow.style.setProperty("--march-x", `${((t * 28) % 16).toFixed(2)}px`);
       }
-      const pill = pillRef.current;
-      if (pill) {
-        const k = 0.5 + 0.5 * Math.sin(t * 3.5);
-        pill.style.boxShadow = `inset 0 0 ${(4 + 6 * k).toFixed(1)}px rgba(34, 197, 94, ${(0.35 + 0.45 * k).toFixed(3)}), 0 0 ${(2 + 4 * k).toFixed(1)}px rgba(34, 197, 94, ${(0.3 + 0.4 * k).toFixed(3)})`;
-        pill.style.borderColor = `rgba(134, 239, 172, ${(0.5 + 0.45 * k).toFixed(3)})`;
+      if (t - lastGlow >= 0.08) {
+        lastGlow = t;
+        const grid = gridRef.current;
+        if (grid) {
+          grid.style.setProperty("--live-op", (0.25 + 0.75 * (0.5 + 0.5 * Math.sin(t * 3.2))).toFixed(3));
+          grid.style.setProperty("--pulse", `${(3.5 + 3.5 * (0.5 + 0.5 * Math.sin(t * 3.9))).toFixed(2)}px`);
+        }
+        const pill = pillRef.current;
+        if (pill) {
+          const k = 0.5 + 0.5 * Math.sin(t * 3.5);
+          pill.style.boxShadow = `inset 0 0 ${(4 + 6 * k).toFixed(1)}px rgba(34, 197, 94, ${(0.35 + 0.45 * k).toFixed(3)}), 0 0 ${(2 + 4 * k).toFixed(1)}px rgba(34, 197, 94, ${(0.3 + 0.4 * k).toFixed(3)})`;
+          pill.style.borderColor = `rgba(134, 239, 172, ${(0.5 + 0.45 * k).toFixed(3)})`;
+        }
       }
       raf = requestAnimationFrame(tick);
     };
@@ -442,6 +459,7 @@ export default function DayView({ token, date, day, canManage, clusterId = null,
               {/* Carril de la hora EN CURSO: banda + bordes punteados animados. */}
               <div
                 className="ap-c-nowrow"
+                ref={nowRowRef}
                 style={{ top: COMPACT_PAD + baHourOf(nowIso) * COMPACT_ROW_H, height: COMPACT_ROW_H }}
               />
               {HOURS.map((hour) => (
