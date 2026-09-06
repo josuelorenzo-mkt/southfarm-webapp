@@ -50,6 +50,9 @@ export default function QuickAddPanel({ token, clusterId, clusterName, accounts,
   const [conflictMode, setConflictMode] = useState<"auto" | "exacto">("auto");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  /** Resultado de la última tanda: una línea por cuenta creada (con el
+      corrimiento explícito cuando el teléfono estaba ocupado). */
+  const [results, setResults] = useState<string[]>([]);
 
   const deviceByAccountId = useMemo(() => {
     const map = new Map<number, number>();
@@ -77,6 +80,7 @@ export default function QuickAddPanel({ token, clusterId, clusterName, accounts,
 
   const submit = async () => {
     setError("");
+    setResults([]);
     if (!selectedIds.length) { setError("Elegí al menos una cuenta."); return; }
     if (!/^\d{2}:\d{2}$/.test(time)) { setError("Horario inválido."); return; }
     const targetIso = new Date(`${date}T${time}:00-03:00`).toISOString();
@@ -107,7 +111,14 @@ export default function QuickAddPanel({ token, clusterId, clusterName, accounts,
             const moved = await plannerApi.applyCascadeMove(token, Number(created?.task_run?.id), targetIso);
             if (moved.ok) effective = targetIso;
           }
-          lines.push(`${account.username} → ${formatBATime(effective)}`);
+          // Feedback explícito: si el teléfono estaba ocupado, la tarea NO
+          // queda en el horario pedido — el usuario tiene que verlo.
+          const effectiveLabel = formatBATime(effective);
+          if (effective !== targetIso) {
+            lines.push(`@${account.username}: pediste ${formatBATime(targetIso)} · quedó en ${effectiveLabel} (teléfono ocupado, se corrió al próximo hueco)`);
+          } else {
+            lines.push(`@${account.username} → ${effectiveLabel}`);
+          }
         } catch (cause) {
           const apiError = PlannerApiError.from(cause);
           failures.push(`${account.username}: ${apiError.message}`);
@@ -115,8 +126,9 @@ export default function QuickAddPanel({ token, clusterId, clusterName, accounts,
       }
       if (failures.length) setError(failures.join(" · "));
       if (lines.length) {
-        // La confirmación visual es el propio timeline refrescándose: se
-        // limpia la selección para que no quede un indicador viejo confundiendo.
+        setResults(lines);
+        // La confirmación visual es el banner de resultado + el timeline
+        // refrescándose: se limpia la selección para no duplicar la tanda.
         setSelectedIds([]);
         onChanged();
       }
@@ -200,6 +212,16 @@ export default function QuickAddPanel({ token, clusterId, clusterName, accounts,
         </div>
 
         {error && <div className="cc-alert cc-alert-error"><span>{error}<button onClick={() => setError("")}>×</button></span></div>}
+        {/* Resultado de la última tanda agregada: hora efectiva por cuenta y
+            aviso explícito cuando el backend corrió la tarea de horario. */}
+        {results.length > 0 && (
+          <div className="ap-qa-result" role="status">
+            <span className="ap-qa-result-title">Agregadas al día:</span>
+            {results.map((line) => (
+              <span className="ap-qa-result-line" key={line}>{line}</span>
+            ))}
+          </div>
+        )}
         {/* Vista previa viva: solo con cuenta+acción+horario elegidos, y
             desaparece al agregar (la selección se limpia). */}
         {!busy && selectedIds.length > 0 && /^\d{2}:\d{2}$/.test(time) && (
