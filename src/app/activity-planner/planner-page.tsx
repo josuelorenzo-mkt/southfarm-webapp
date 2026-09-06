@@ -18,6 +18,7 @@ import {
   currentWeekStart,
   formatBATime,
   relativeBA,
+  shortDate,
   shiftDateKey,
 } from "./types";
 import type { DayResponse, WeekResponse } from "./types";
@@ -155,10 +156,13 @@ export default function PlannerPage({ token, canManage }: PlannerPageProps) {
     setView("day");
   };
 
-  /** openDay(dateKey, clusterId) — con clúster = vista día DE ESE clúster. */
+  /** openDay(dateKey, clusterId) — con clúster = vista día DE ESE clúster.
+   *  También fija el clúster seleccionado: así el tab "Día clúster" sigue
+   *  habilitado y conserva el clúster aunque se navegue a otra vista. */
   const openDay = (dateKey: string, scopedClusterId: number | null = null) => {
     setDayDate(dateKey);
     setDayClusterId(scopedClusterId);
+    if (scopedClusterId !== null) setClusterId(scopedClusterId);
     setView("day");
   };
 
@@ -168,13 +172,12 @@ export default function PlannerPage({ token, canManage }: PlannerPageProps) {
     setView("day");
   };
 
+  /** Tab "Día clúster": muestra el día del clúster más recientemente
+   *  seleccionado (por clic en la semana o desde la vista cluster). */
   const openClusterDay = () => {
-    if (dayClusterId !== null) {
-      setView("day");
-      return;
-    }
-    if (clusterId !== null) {
-      setDayClusterId(clusterId);
+    const target = clusterId ?? dayClusterId;
+    if (target !== null) {
+      setDayClusterId(target);
       setView("day");
     }
   };
@@ -232,9 +235,9 @@ export default function PlannerPage({ token, canManage }: PlannerPageProps) {
     }
   };
 
-  const weekTitle = weekStart
-    ? `lun ${weekDays[0].slice(8)} – dom ${weekDays[6].slice(8)} ${new Date(`${weekDays[0]}T12:00:00`).toLocaleDateString("es-AR", { month: "short" })}`
-    : "";
+  // Cada extremo con SU mes: una semana que cruza de mes no puede mostrar
+  // "dom 06 ago" para el 6 de septiembre.
+  const weekTitle = weekStart ? `${shortDate(weekDays[0])} – ${shortDate(weekDays[6])}` : "";
 
   return (
     <div className="ap-planner">
@@ -372,6 +375,10 @@ export default function PlannerPage({ token, canManage }: PlannerPageProps) {
             </div>
           ) : day ? (
             <DayView
+              // Re-montar al cambiar de scope: el auto-scroll a AHORA vive en
+              // un useEffect once-per-mount; sin key, cambiar entre el día
+              // completo y el del clúster conserva el scroll viejo.
+              key={dayClusterId === null ? "day-all" : `day-cluster-${dayClusterId}`}
               token={token}
               date={dayDate}
               day={day}
